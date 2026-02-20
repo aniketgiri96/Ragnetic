@@ -1,43 +1,55 @@
 # KnowAI
 
-## Vision
-The vision of KnowAI is to empower users with the knowledge and tools necessary to harness Artificial Intelligence effectively. It aims to be a comprehensive platform that provides resources, tutorials, and applications for AI enthusiasts and professionals.
+**Open-Source RAG Knowledge Base Platform**
+
+KnowAI is a self-hosted, enterprise-ready Retrieval-Augmented Generation (RAG) platform. It allows organizations to deploy a private, controllable AI system that reasons over proprietary data in minutes, without vendor lock-in or leaking data to third-party cloud APIs.
 
 ## Features
-- **Extensive Resource Library:** A collection of articles, papers, and tutorials on AI topics.
-- **Interactive Tools:** Users can engage with various AI algorithms and models through a user-friendly interface.
-- **Community Engagement:** A forum for users to discuss ideas, share projects, and seek help.
-- **Regular Updates:** Continuous addition of new content and tools to keep users informed about the latest advancements in AI.
 
-## Tech Stack
-- **Frontend:** React.js for building dynamic and responsive user interfaces.
-- **Backend:** Node.js with Express.js for serving APIs and handling requests.
-- **Database:** MongoDB for storing user data and resources.
-- **Hosting:** Deployed on AWS for reliable performance and scalability.
+- **5-Minute Deployment**: Spin up the entire stack using a single `docker-compose up` command.
+- **Semantic-Aware Chunking**: Intelligently chunks documents respecting structural integrity and semantic topic boundaries.
+- **Hybrid Retrieval & Reranking**: Combines dense vector search (Qdrant) and sparse search (BM25) with cross-encoder reranking for maximum accuracy.
+- **Grounded Generation**: Minimized hallucinations through strict citation-enforced prompting. Every answer includes exact source highlights.
+- **Multi-Tenancy & Access Control**: Built-in Knowledge Base-Scoped Role-Based Access Control (RBAC). 
+- **Reliable Async Ingestion**: Celery-powered document processing with progress tracking.
+- **Local First**: Built-in support for running LLMs and embedding models locally using Ollama and `sentence-transformers`.
 
-## Quick Start
-1. **Clone the repository:**
+## Quickstart
+
+### Prerequisites
+- Docker and Docker Compose installed.
+
+### Run Locally
+1. Clone the repository:
    ```bash
-   git clone https://github.com/aniketgiri96/knowai.git
+   git clone https://github.com/knowai/knowai.git
    cd knowai
    ```
-2. **Install dependencies:**
+2. Start the services:
    ```bash
-   npm install
+   docker-compose up -d
    ```
-3. **Run the application:**
-   ```bash
-   npm start
-   ```
-4. **Access the app:**
-   Open your browser and navigate to `http://localhost:3000`.
+3. Access the KnowAI Dashboard:
+   Navigate to [http://localhost:3000](http://localhost:3000)
 
-## Contribution Guidelines
-Contributions are welcome! Please follow these steps to contribute:
-1. **Fork the repository.**
-2. **Create a feature branch:** `git checkout -b feature-name`.
-3. **Commit your changes:** `git commit -m 'Add new feature'`.
-4. **Push to the branch:** `git push origin feature-name`.
-5. **Create a pull request.**
+4. Access the Backend API Docs:
+   Navigate to [http://localhost:8000/docs](http://localhost:8000/docs)
 
-Thank you for contributing to KnowAI!
+## Architecture
+
+KnowAI uses a modern, scalable stack:
+- **Frontend**: Next.js 14, TailwindCSS, Shadcn UI
+- **Backend**: Python 3.11+, FastAPI, Celery
+- **Database**: PostgreSQL 15 (User Auth, Metadata)
+- **Vector Database**: Qdrant (Embeddings)
+- **Task Broker/Cache**: Redis
+- **Embedding Models**: `sentence-transformers`
+- **LLM Support**: Ollama (Local), OpenAI/Anthropic (Cloud)
+
+## Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to get started, our development workflow, and coding standards.
+
+## License
+
+This project is licensed under the Apache 2.0 License. See the `LICENSE` file for details.

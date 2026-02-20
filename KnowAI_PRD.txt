@@ -1,0 +1,606 @@
+
+KNOWAI
+Open-Source RAG Knowledge Base Platform
+PRODUCT REQUIREMENTS DOCUMENT  |  MARKET ANALYSIS  |  BOTTLENECK SOLUTIONS
+
+v1.0  •  February 2026  •  CONFIDENTIAL
+
+1. Executive Summary
+
+Vision Statement
+KnowAI is the simplest, most beautiful, fully self-hosted RAG knowledge platform. Deploy in 5 minutes. Own your data. No vendor lock-in. Enterprise-ready from day one.
+
+The enterprise knowledge management market is undergoing a fundamental shift. Organizations increasingly demand private, controllable AI systems that can reason over their proprietary data without leaking it to third-party cloud APIs. Yet current open-source solutions force a painful tradeoff: either accept extreme complexity (Casibase, LangChain) or settle for toy-grade simplicity (Open-Notebook, basic Streamlit demos).
+
+KnowAI fills the critical gap between these extremes — an enterprise-grade, privacy-first RAG platform that a solo developer can deploy in minutes and a Fortune 500 IT team can trust in production.
+
+Dimension
+Current State
+KnowAI Target
+Time to first query
+2–8 hours setup
+< 5 minutes (Docker)
+User experience
+CLI or basic UI
+Polished, intuitive dashboard
+Data sources
+1–2 manually
+10+ auto-ingested connectors
+Multi-user support
+None or paid-only
+Built-in RBAC, free & open
+Documentation
+Sparse / outdated
+10x better, with video guides
+Deployment
+Complex configs
+Single docker-compose up
+
+
+2. Market Analysis & Competitive Landscape
+2.1 Market Size & Opportunity
+The global enterprise knowledge management market is valued at $1.1 billion in 2024 and projected to reach $2.4 billion by 2029 (CAGR ~16%). The AI-powered subset — RAG-based retrieval systems — is the fastest-growing segment, driven by LLM adoption across industries.
+
+Key demand drivers include: data privacy regulations (GDPR, HIPAA, SOC 2) forcing on-premise deployments; rising cost fatigue with proprietary AI APIs (OpenAI, Anthropic) at enterprise scale; and organizational demand to capitalize on internal documentation, code, and institutional knowledge without external exposure.
+
+2.2 Competitor Analysis
+
+Product
+Stars
+Strengths
+Critical Weaknesses
+Our Advantage
+Reor
+8.5K
+Local-first, privacy focus, clean UI
+Single-user only, no enterprise, no APIs
+Multi-user RBAC, API-first, enterprise features
+Casibase
+4.4K
+Full enterprise, admin UI, multi-user
+Extreme complexity, Go stack, poor docs, heavy ops burden
+5-min deploy, modern stack, 10x better docs
+Open-Notebook
+40
+Simple concept
+Streamlit-only, no auth, no scale, proof-of-concept only
+Full-stack, production-ready, real UX
+LangChain
+Industry std
+700+ integrations, flexible
+Not a product — a library. Requires massive glue code
+Complete product, zero glue code required
+LlamaIndex
+Popular
+Flexible indexing
+Not production-ready pipeline, developer tooling only
+End-to-end product for both devs and non-devs
+Notion AI
+Mainstream
+Polished UX, familiar
+Proprietary, cloud-only, no RAG over own docs, $$$
+Self-hosted, open, full RAG, free
+
+2.3 Differentiation Strategy
+KnowAI wins on four distinct axes that no competitor currently combines:
+
+	•	Simplicity + Power: 5-minute Docker deploy with enterprise-grade features. The only product in this space that doesn't require a DevOps team OR limit you to toy use cases.
+	•	Documentation-first culture: Invest 30% of early engineering effort in docs, video tutorials, architecture guides, and contribution guidelines. This is the single biggest unlock for open-source adoption.
+	•	Beautiful, opinionated UX: Competitors either have no UI or a generic admin panel. KnowAI ships a polished Next.js dashboard that non-technical users love — making adoption viral within organizations.
+	•	Multi-source ingestion out-of-the-box: PDFs, Confluence, Slack, GitHub, emails, Notion — all supported at launch, not as an afterthought. This directly addresses the #1 enterprise complaint about RAG systems.
+
+
+3. Core Bottlenecks & How We Solve Them
+Building a production-grade RAG system involves 9 known hard problems. Here is a detailed breakdown of each bottleneck and KnowAI's specific solution:
+
+Bottleneck 1: Chunking Quality
+The Problem
+Naive fixed-size chunking breaks semantic coherence — splitting sentences mid-thought, losing table structures, ignoring document hierarchy. This is the #1 silent killer of RAG quality. Most open-source projects use character-count chunking, resulting in 30-50% degraded retrieval accuracy.
+
+KnowAI Solution: Semantic-Aware Chunking Pipeline
+	•	Document-type detection: Auto-detect PDFs, DOCX, Markdown, HTML, code files and apply format-specific parsers (PyMuPDF for PDFs, python-docx for Word, tree-sitter for code).
+	•	Hierarchical chunking: Respect document structure — H1/H2/H3 boundaries, paragraph breaks, code blocks — before applying size limits.
+	•	Semantic boundary detection: Use sentence-transformers to detect topic shifts. Never split mid-concept regardless of chunk size setting.
+	•	Metadata injection: Every chunk stores: source doc, page number, section heading breadcrumb, surrounding context snippet for LLM prompt enrichment.
+	•	Overlap strategy: Configurable sentence-level overlap (not character-level) to prevent context loss at boundaries.
+
+Bottleneck 2: Retrieval Accuracy
+The Problem
+Pure vector similarity search fails for keyword-specific queries ('what is our refund policy for orders over $500?'). Pure BM25 keyword search fails for semantic queries ('how do we handle upset customers?'). Picking one means 40-60% of real-world queries underperform.
+
+KnowAI Solution: Hybrid Retrieval + Reranking
+	•	Dual retrieval: Run dense vector search (Qdrant) and sparse BM25 search (via Elasticsearch or Tantivy) in parallel on every query.
+	•	Reciprocal Rank Fusion (RRF): Merge results from both pipelines using RRF — a mathematically proven combination strategy that outperforms either approach alone by 15-25% on standard benchmarks.
+	•	Cross-encoder reranking: Pass top-20 candidates through a cross-encoder (ms-marco-MiniLM-L-6-v2 or similar) to produce final top-5 with high precision. This step alone improves answer quality by 20-35%.
+	•	Query expansion: Auto-expand user queries using HyDE (Hypothetical Document Embeddings) — generate a synthetic answer, embed it, retrieve against real docs. Dramatically improves recall for vague queries.
+
+Bottleneck 3: LLM Hallucination & Source Attribution
+The Problem
+RAG systems still hallucinate when retrieved context is insufficient. Users cannot tell which parts of the answer are grounded in real documents vs. fabricated. This destroys enterprise trust.
+
+KnowAI Solution: Grounded Generation with Citation Enforcement
+	•	Citation-enforced prompting: System prompt mandates LLM to ONLY use retrieved context and cite exact source+chunk for every claim. Non-citable claims must be flagged explicitly.
+	•	Faithfulness scoring: Post-generation, run RAGAS faithfulness score to detect hallucinations. Flag low-confidence responses in the UI.
+	•	Source highlighting: Every answer in the chat UI shows expandable source cards with the exact passage highlighted in the original document.
+	•	Confidence indicators: Answer UI shows retrieval confidence score, number of sources consulted, and a 'low confidence' warning when the system is uncertain.
+
+Bottleneck 4: Embedding Model Selection & Drift
+The Problem
+If you change your embedding model after indexing 10,000 documents, you must re-index everything — often taking hours and causing search degradation during migration. Most systems have no answer for this.
+
+KnowAI Solution: Model-Versioned Vector Namespaces
+	•	Namespace isolation: Each embedding model version gets its own Qdrant collection namespace. Documents indexed under model_v1 remain searchable while re-indexing under model_v2 runs in background.
+	•	Zero-downtime migration: Background re-indexing job with progress tracking. Queries route to new namespace only after 100% of docs are migrated and validation passes.
+	•	Model registry: Admin UI shows active embedding models, vector dimensions, indexing status per collection, and migration history.
+
+Bottleneck 5: Multi-Tenancy & Access Control
+The Problem
+Most open-source RAG tools are single-user or have no access control. In enterprise settings, HR documents should not be retrievable by engineering, and vice versa. This is a hard architectural requirement, not a feature.
+
+KnowAI Solution: Knowledge Base-Scoped RBAC
+	•	Hierarchical structure: Organization > Teams > Knowledge Bases > Documents. Each layer has independent access policies.
+	•	Role definitions: Admin (full control), Editor (upload/delete docs), Viewer (query only), API User (programmatic access). All assignable at KB level.
+	•	Query isolation: Every search query is automatically scoped to Knowledge Bases the user has access to — enforced at the vector DB query layer, not just UI layer.
+	•	Audit logs: Every query, upload, deletion, and admin action is logged with user ID, timestamp, and KB context. Exportable for compliance.
+
+Bottleneck 6: Document Ingestion at Scale
+The Problem
+Ingesting 50,000 company documents synchronously blocks the API and makes the system unusable. Poorly managed async ingestion leads to silent failures, duplicate documents, and stale embeddings.
+
+KnowAI Solution: Reliable Async Ingestion Pipeline
+	•	Celery task queue: All ingestion jobs enqueued to Celery with Redis broker. Workers process in parallel, configurable concurrency.
+	•	Idempotent processing: Document fingerprinting (SHA-256 hash) prevents duplicate ingestion. Re-uploading the same file is a no-op.
+	•	Incremental sync: Connectors (Confluence, Slack, Google Drive) track last-sync timestamp. Only new/modified documents are re-ingested.
+	•	Dead letter queue: Failed ingestion jobs go to DLQ with full error logs. Admin UI shows failed jobs with one-click retry.
+	•	Progress tracking: Real-time ingestion progress visible in UI — files queued, processing, complete, failed — with estimated completion time.
+
+Bottleneck 7: Context Window Management
+The Problem
+Stuffing too many retrieved chunks into the LLM context degrades answer quality and increases cost. Retrieving too few misses relevant information. The 'right' number is document-type and query-type dependent.
+
+KnowAI Solution: Adaptive Context Assembly
+	•	Dynamic chunk selection: Start with top-K candidates from reranker. Run token counting. Add chunks greedily until hitting 75% of model's context limit.
+	•	Relevance-weighted assembly: Higher-scoring chunks placed at beginning and end of context (known 'lost in the middle' LLM behavior mitigation).
+	•	Context compression: Optional LLMLingua-style compression to reduce chunk tokens by 30-50% while preserving key information, enabling more sources per query.
+
+Bottleneck 8: Cold Start & Empty State
+The Problem
+When a new user or team deploys KnowAI with zero documents, the system is useless. First-time experience (FTUE) is the #1 adoption killer for enterprise tools.
+
+KnowAI Solution: Guided Onboarding Flow
+	•	Interactive setup wizard: 5-step onboarding: Create org > Name first KB > Connect first source > Ingest sample doc > Ask first question.
+	•	Sample knowledge base: Optional pre-loaded 'KnowAI Documentation' KB so users can immediately explore the product using the product itself.
+	•	Progress indicators: Dashboard shows ingestion progress, first query prompt, and suggested actions until the KB has at least 10 documents.
+
+Bottleneck 9: Observability & Quality Measurement
+The Problem
+How do you know if your RAG system is getting better or worse over time? Most systems have no answer metrics — you're flying blind.
+
+KnowAI Solution: Built-in RAG Evaluation Dashboard
+	•	RAGAS integration: Automatically compute faithfulness, answer relevance, context precision, and context recall on a sample of queries daily.
+	•	Query analytics: Track: most common queries, zero-result queries (gaps in KB), average retrieval time, user thumbs up/down feedback per answer.
+	•	Drift detection: Alert admins when retrieval quality metrics drop below configured thresholds — early warning system for KB degradation.
+
+
+4. Product Requirements Document
+4.1 Product Overview
+Product Name: KnowAI  |  Type: Open-Source, Self-Hosted RAG Platform  |  License: Apache 2.0
+
+Target Users: (1) Engineering teams that want a self-hosted AI knowledge base with API access. (2) Non-technical business users who want to chat with internal documents. (3) IT/DevOps teams deploying at enterprise scale.
+
+4.2 User Personas
+Persona
+Role
+Primary Goal
+Pain Point
+Priya
+Engineering Lead
+RAG API for internal chatbot
+LangChain is too complex; no production pipeline
+Marcus
+HR Manager
+Chat with policy docs without IT help
+Current tools require dev support
+Sofia
+IT Admin
+Deploy & manage multi-team KB platform
+Most tools have no access control or audit logs
+Arjun
+Open-Source Dev
+Contribute to and extend the platform
+Poor docs and opaque codebases block contribution
+
+4.3 Feature Requirements
+Phase 1 — MVP (Months 1-3)
+
+Feature
+Priority
+Description
+Acceptance Criteria
+Document Upload
+P0
+Upload PDF, DOCX, TXT, MD via drag-and-drop UI or API
+Files ingested in <30s for docs <10MB; chunked and embedded automatically
+Semantic Search
+P0
+Hybrid vector + BM25 search across all KBs user has access to
+Returns top-5 relevant results with source attribution in <2s
+Chat Interface
+P0
+Multi-turn conversation with LLM grounded on retrieved docs
+Answers cite exact source; conversation history persisted per session
+User Auth
+P0
+Email/password login with JWT; OAuth (Google, GitHub) optional
+Sessions expire in 24h; password reset via email
+Knowledge Bases
+P0
+Create/delete KBs; assign documents to KBs; basic permissions
+Users can only query KBs they have access to
+Docker Deploy
+P0
+Single docker-compose up command starts all services
+Full stack running on clean machine in <5 minutes
+REST API
+P1
+API endpoints for upload, search, chat with API key auth
+OpenAPI spec published; all endpoints documented with examples
+Admin Dashboard
+P1
+User management, KB overview, system health metrics
+Admin can create/delete users, assign roles, view ingestion status
+Ingestion Status
+P1
+Real-time progress tracker for document ingestion
+Users see queued/processing/complete/failed with error details
+Local LLM (Ollama)
+P1
+Run Llama 3 or Mistral locally via Ollama integration
+Queries answered without any external API calls when configured
+
+Phase 2 — Growth (Months 4-6)
+
+Feature
+Priority
+Description
+Connectors
+P0
+Confluence, Notion, Google Drive, GitHub, Slack auto-ingestion with incremental sync
+Reranking
+P0
+Cross-encoder reranking of retrieved chunks for higher precision
+RBAC
+P0
+Role-based access control: Admin, Editor, Viewer, API User per Knowledge Base
+Audit Logs
+P1
+Full audit trail: queries, uploads, admin actions with export
+Analytics Dashboard
+P1
+Query volume, top queries, zero-result gaps, user feedback scores
+SSO (SAML/OIDC)
+P1
+Enterprise SSO integration for Okta, Auth0, Azure AD
+Webhook Support
+P2
+Trigger external actions on new doc ingestion or query events
+Multi-modal
+P2
+Image extraction from PDFs; OCR for scanned documents (Tesseract)
+
+Phase 3 — Enterprise (Months 7-12)
+
+Feature
+Description
+Knowledge Graph
+Auto-extract entities and relationships from docs; graph-based retrieval for multi-hop reasoning
+Agentic Workflows
+Define multi-step agents that can search KBs, call APIs, and synthesize multi-source answers
+Fine-tuning Pipeline
+UI-guided workflow to fine-tune embedding models on organization-specific vocabulary
+Kubernetes Helm Chart
+Production-grade Helm chart for cloud-native deployment with horizontal scaling
+White-label API
+Full white-label mode for embedding KnowAI into ISV products
+Compliance Reports
+Auto-generated SOC 2 / HIPAA evidence reports from audit logs
+
+4.4 Non-Functional Requirements
+	•	Performance: P95 query latency < 2 seconds for KBs up to 100,000 documents on standard hardware (8 CPU, 16GB RAM).
+	•	Scalability: Horizontal scaling of ingestion workers via Celery. Qdrant supports distributed mode for >1M documents.
+	•	Reliability: 99.5% uptime SLA for managed deployments. Graceful degradation if LLM unavailable (return retrieved docs without synthesis).
+	•	Security: All data encrypted at rest (AES-256) and in transit (TLS 1.3). No data leaves the deployment boundary unless explicitly configured.
+	•	Privacy: Zero telemetry by default. Opt-in anonymous usage metrics only. GDPR-compliant data deletion.
+
+
+5. Technical Architecture
+5.1 System Components
+
+Layer
+Technology
+Rationale
+Frontend
+Next.js 14, TypeScript, TailwindCSS, ShadcnUI
+SSR for SEO, TypeScript for reliability, ShadcnUI for polished components without heavy dependencies
+State Management
+Zustand + TanStack Query
+Zustand for global state, TanStack Query for server state caching and background refetch
+Backend API
+FastAPI (Python 3.11+)
+Async-native, Pydantic validation, auto-generates OpenAPI spec, fastest Python framework for I/O-bound workloads
+Task Queue
+Celery + Redis
+Industry standard for distributed task processing; Redis doubles as cache and pub/sub for real-time status updates
+Primary Database
+PostgreSQL 15
+ACID compliance for user data, KB metadata, audit logs; strong ecosystem
+Vector Store
+Qdrant
+Purpose-built vector DB; self-hostable; supports hybrid search natively; significantly faster than pgvector at scale
+Embedding Models
+sentence-transformers (local) / OpenAI fallback
+Default: all-MiniLM-L6-v2 for speed; BAAI/bge-large-en for quality; configurable per KB
+LLM Inference
+Ollama (local) / OpenAI / Anthropic (cloud)
+Fully local by default; cloud APIs as optional fallback for max quality
+Search (BM25)
+Elasticsearch (optional) / BM25Okapi (embedded)
+Embedded BM25 for simple deploys; Elasticsearch for production hybrid search at scale
+Object Storage
+Local filesystem / S3-compatible
+MinIO for self-hosted S3; native S3 for cloud; abstracted behind single interface
+
+5.2 Data Flow Architecture
+Ingestion Flow
+	•	Upload: User uploads file via UI drag-drop or POST /api/upload. FastAPI stores to object store, creates Document record in PostgreSQL, enqueues Celery task.
+	•	Parse: Celery worker picks up task. Selects appropriate parser based on MIME type. Extracts text and metadata.
+	•	Chunk: Apply semantic chunking pipeline. Generate metadata-enriched chunk objects.
+	•	Embed: Batch chunks through embedding model. Receive dense vectors.
+	•	Index: Upsert vectors + metadata into Qdrant collection (namespace scoped to KB + embedding model version).
+	•	Notify: Update Document status in PostgreSQL to 'indexed'. Publish status update to Redis pub/sub. UI receives real-time update via WebSocket.
+
+Query Flow
+	•	Auth: Validate JWT. Extract user's accessible KB IDs.
+	•	Query Processing: Clean and optionally expand user query. Generate query embedding.
+	•	Hybrid Retrieval: Parallel dense search (Qdrant) and sparse search (BM25). Merge with RRF.
+	•	Rerank: Pass top-20 candidates through cross-encoder. Select top-5.
+	•	Context Assembly: Build LLM prompt with retrieved chunks, source metadata, conversation history.
+	•	LLM Generation: Stream response from configured LLM (Ollama/OpenAI). Enforce citation format.
+	•	Post-Process: Extract citations, compute RAGAS scores asynchronously, store query+answer in PostgreSQL.
+	•	Stream to Client: Chunk-by-chunk streaming via Server-Sent Events. Source cards rendered after response completes.
+
+
+6. Go-to-Market Strategy
+6.1 Launch Plan
+Phase
+Timeline
+Action
+Success Metric
+Stealth Build
+Month 1-2
+Build MVP, write docs, internal testing
+Working demo with 3+ data connectors
+Soft Launch
+Month 3
+GitHub public release, HackerNews Show HN post
+500+ GitHub stars in first week
+Community Launch
+Month 4
+ProductHunt launch, Reddit (r/selfhosted, r/MachineLearning, r/LocalLLaMA)
+2,000+ GitHub stars; 200+ Discord members
+Content Push
+Month 5-6
+Tutorial blog posts, YouTube demo, comparison articles vs. LangChain/Casibase
+5,000+ stars; 1,000+ active deployments
+Enterprise Outreach
+Month 7+
+Reach out to enterprise users via LinkedIn, conferences, GitHub sponsors
+First 10 enterprise customers or sponsors
+
+6.2 Community Strategy
+	•	GitHub: Maintain a clear contribution guide (CONTRIBUTING.md), labeled 'good first issues', weekly public office hours in Discord.
+	•	Documentation: Deploy dedicated docs site (Docusaurus or Mintlify). Include: quickstart, architecture deep-dive, API reference, video walkthroughs for each connector.
+	•	Content: Publish 2 technical blog posts per month: RAG best practices, benchmark results, connector tutorials.
+	•	Feedback loops: Monthly changelog, public roadmap (GitHub Projects), community voting on features.
+
+6.3 Monetization Path (Optional, Post-Traction)
+KnowAI remains fully open-source (Apache 2.0) forever. Monetization is additive, never restrictive:
+
+	•	KnowAI Cloud: Managed hosting for teams that don't want to self-host. Pricing per seat or usage.
+	•	Enterprise Support: Paid SLAs, dedicated Slack channel, custom connector development.
+	•	GitHub Sponsors: Enable sponsor tiers for companies using KnowAI in production.
+	•	Training & Certification: Paid courses on RAG architecture and KnowAI deployment.
+
+
+7. Risks & Mitigations
+
+Risk
+Likelihood
+Impact
+Mitigation
+Large player (Notion, Confluence) launches self-hosted RAG
+Medium
+High
+Move faster on community & enterprise features. Open-source moat is hard to replicate with proprietary culture.
+LLM API costs make self-hosting unviable
+Low
+Medium
+Always support local models (Ollama) as first-class option. Cloud APIs are optional.
+Low community contribution rate
+Medium
+Medium
+Invest heavily in docs and 'good first issues'. Acknowledge all contributors in changelogs.
+Vector DB performance at enterprise scale
+Low
+High
+Architecture supports Qdrant distributed mode and Elasticsearch. Load test at 10M+ vectors pre-launch.
+Security vulnerability in self-hosted deployments
+Medium
+High
+Security-first design: rate limiting, input sanitization, regular dependency audits, responsible disclosure policy.
+Embedding model quality regression across updates
+Low
+Medium
+Model-versioned namespaces (Bottleneck 4 solution) prevent forced re-indexing on updates.
+
+
+8. Success Metrics & KPIs
+
+8.1 Product Health
+Metric
+3-Month Target
+6-Month Target
+12-Month Target
+GitHub Stars
+1,000
+5,000
+15,000
+Active Deployments
+100
+500
+2,000
+Discord Members
+200
+1,000
+3,000
+Avg. Setup Time
+< 10 min
+< 7 min
+< 5 min
+Community Contributors
+10
+40
+100
+Docs NPS Score
+40+
+50+
+60+
+
+8.2 RAG Quality (in-product)
+Metric
+Baseline (Launch)
+Target (6 months)
+RAGAS Faithfulness Score
+> 0.80
+> 0.90
+P95 Query Latency
+< 3s
+< 2s
+Retrieval Precision@5
+> 0.70
+> 0.85
+User Thumbs-Up Rate
+> 65%
+> 80%
+Zero-result Query Rate
+< 20%
+< 10%
+
+
+9. Immediate Next Steps (Week 1-4)
+
+Priority Order
+These steps are sequenced for maximum momentum. Do not skip documentation — it is your #1 growth lever.
+
+	•	Week 1 — Repository & Foundation: Create GitHub org. Set up monorepo (Next.js frontend + FastAPI backend). Write comprehensive README with vision, screenshots, and quickstart. Create CONTRIBUTING.md and issue templates. Enable GitHub Discussions.
+	•	Week 1 — Docker Compose: Implement docker-compose.yml that boots: FastAPI, Next.js, PostgreSQL, Qdrant, Redis, Celery worker, and Flower (Celery monitor) in one command. This is your #1 demo asset.
+	•	Week 2 — Core Ingestion: Implement PDF, DOCX, TXT, MD parsers. Semantic chunking pipeline. Qdrant indexing. Celery async workers with progress tracking.
+	•	Week 2 — Core Query: Hybrid retrieval (BM25 + dense vector). Basic reranking. FastAPI chat endpoint with streaming. Ollama integration for local LLM.
+	•	Week 3 — Frontend MVP: Next.js dashboard: Upload UI, Knowledge Base management, Chat interface with source attribution, User auth screens.
+	•	Week 3 — Auth & Multi-user: JWT authentication. Email/password + Google OAuth. Basic KB-level permissions. User management admin page.
+	•	Week 4 — Polish & Docs: Error states, loading skeletons, empty states, onboarding wizard. Write quickstart docs. Record 5-minute demo video. Prepare Show HN post draft.
+
+
+Appendix: Reference Architecture
+A. Recommended Hardware for Self-Hosting
+Tier
+Hardware
+Expected Capacity
+Use Case
+Starter
+4 CPU, 8GB RAM, 50GB SSD
+Up to 10,000 documents
+Personal or small team use
+Team
+8 CPU, 16GB RAM, 200GB SSD
+Up to 100,000 documents
+Engineering team or department
+Enterprise
+16 CPU, 64GB RAM, 1TB NVMe + GPU (optional)
+1M+ documents
+Company-wide deployment
+Cloud (AWS)
+c5.2xlarge + r5.large DB
+100K+ documents (managed)
+Cloud-hosted enterprise
+
+B. Supported Embedding Models at Launch
+Model
+Dims
+Speed
+Quality
+Best For
+all-MiniLM-L6-v2
+384
+Very Fast
+Good
+Default — balanced performance/quality
+BAAI/bge-large-en-v1.5
+1024
+Medium
+Excellent
+High-quality production deployments
+nomic-embed-text
+768
+Fast
+Very Good
+Local-only deployments (via Ollama)
+text-embedding-3-small
+1536
+API
+Excellent
+OpenAI API fallback
+text-embedding-3-large
+3072
+API
+Best
+Max quality (higher cost)
+
+C. Supported LLMs at Launch
+Model
+Provider
+Privacy
+Quality
+Recommended For
+Llama 3.1 8B
+Ollama (local)
+Full
+Good
+Default local model — 8GB VRAM or CPU
+Llama 3.1 70B
+Ollama (local)
+Full
+Excellent
+High-end local GPU (48GB+ VRAM)
+Mistral 7B
+Ollama (local)
+Full
+Good
+Fast local alternative
+GPT-4o
+OpenAI API
+None
+Best
+Max quality, cloud acceptable
+Claude 3.5 Sonnet
+Anthropic API
+None
+Best
+Best reasoning, cloud acceptable
+Gemini 1.5 Pro
+Google API
+None
+Excellent
+Long context (1M tokens)
+
+Document prepared by Claude  |  KnowAI Product Team  |  February 2026
