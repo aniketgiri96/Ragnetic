@@ -4,7 +4,7 @@ from celery import Celery
 from .config import settings
 
 celery_app = Celery(
-    "knowai",
+    "ragnetic",
     broker=settings.broker_url,
     backend=settings.result_backend,
     include=["app.tasks.ingestion"],

@@ -1,6 +1,6 @@
 # Product Overview
 
-- **Product name:** KnowAI  
+- **Product name:** Ragnetic  
 - **Type:** Open-source, self-hosted RAG platform  
 - **License:** Apache 2.0  
 
@@ -12,7 +12,7 @@
 
 ## Product Summary
 
-KnowAI provides a single deployable stack (Docker Compose) that includes:
+Ragnetic provides a single deployable stack (Docker Compose) that includes:
 
 - Document ingestion (upload and connectors) with semantic-aware chunking  
 - Hybrid retrieval (vector + BM25) and reranking  

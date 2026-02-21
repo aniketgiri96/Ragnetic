@@ -7,6 +7,7 @@ from app.ingestion.embedding import embed_texts
 from app.ingestion.parsers import parse_document
 from app.models.base import SessionLocal, Base
 from app.models.document import Document, DocumentStatus
+from app.models.user import User  # noqa: F401 - ensure mapper registration for relationships
 from app.services.qdrant_client import ensure_collection, upsert_chunks, collection_name
 from app.services.storage import get_stream
 from qdrant_client.models import PointStruct

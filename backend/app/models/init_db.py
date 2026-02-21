@@ -1,6 +1,7 @@
 """Create tables and default knowledge base."""
 from app.models.base import Base, engine, SessionLocal
-from app.models.document import Document, KnowledgeBase
+from app.models.chat import ChatMessage, ChatSession
+from app.models.document import Document, KnowledgeBase, KnowledgeBaseMembership
 from app.models.user import User  # noqa: F401 - register model for create_all
 
 

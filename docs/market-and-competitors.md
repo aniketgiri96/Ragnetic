@@ -8,7 +8,7 @@ Demand drivers include: data privacy regulations (GDPR, HIPAA, SOC 2) pushing on
 
 ## Competitor Overview
 
-| Product | Strengths | Critical weaknesses | KnowAI advantage |
+| Product | Strengths | Critical weaknesses | Ragnetic advantage |
 |---------|-----------|----------------------|-------------------|
 | **Reor** | Local-first, privacy, clean UI | Single-user, no enterprise, no APIs | Multi-user RBAC, API-first, enterprise features |
 | **Casibase** | Enterprise, admin UI, multi-user | High complexity, Go stack, poor docs | 5-min deploy, modern stack, better docs |
@@ -19,7 +19,7 @@ Demand drivers include: data privacy regulations (GDPR, HIPAA, SOC 2) pushing on
 
 ## Differentiation Strategy
 
-KnowAI competes on four axes:
+Ragnetic competes on four axes:
 
 1. **Simplicity + power:** 5-minute Docker deploy with enterprise features—no DevOps team required and no toy limitations.
 2. **Documentation-first:** Early investment in docs, video tutorials, architecture guides, and contribution guidelines to drive adoption.

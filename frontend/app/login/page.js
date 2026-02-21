@@ -5,13 +5,10 @@ import { useRouter } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-const inputClass =
-  "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 min-h-[2.5rem]";
-const labelClass = "mb-1 block text-sm font-medium text-slate-700";
-const btnPrimary =
-  "min-h-[2.5rem] cursor-pointer rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
-const btnSecondary =
-  "min-h-[2.5rem] cursor-pointer rounded-lg border border-slate-300 bg-white px-4 py-2 font-medium text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2";
+const inputClass = "fut-input";
+const labelClass = "fut-label";
+const btnPrimary = "fut-btn";
+const btnSecondary = "fut-btn-ghost";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -40,7 +37,7 @@ export default function LoginPage() {
       if (isRegister) {
         setDone("Registered. You can log in now.");
       } else {
-        localStorage.setItem("knowai_token", data.access_token);
+        localStorage.setItem("ragnetic_token", data.access_token);
         setDone("Logged in.");
         setTimeout(() => router.push("/upload"), 500);
       }
@@ -50,13 +47,22 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-slate-900">
-        {isRegister ? "Register" : "Login"}
-      </h1>
+    <div className="space-y-8 max-w-2xl mx-auto">
+      <section className="space-y-3">
+        <p className="fut-kicker">Identity Verification</p>
+        <h1 className="fut-title text-4xl sm:text-5xl flex items-end gap-3">
+          <span className="fut-script text-6xl sm:text-7xl text-slate-900">
+            {isRegister ? "Register" : "Login"}
+          </span>
+          <span className="fut-title-gradient">Access Node</span>
+        </h1>
+        <p className="text-slate-600">
+          Authenticate locally against your self-hosted Ragnetic backend.
+        </p>
+      </section>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="fut-panel">
+        <form onSubmit={handleSubmit} className="space-y-4 p-4 sm:p-5">
           <div>
             <label htmlFor="login-email" className={labelClass}>
               Email
@@ -92,7 +98,7 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className="mt-4 pt-4 border-t border-slate-200">
+        <div className="mt-4 border-t border-slate-300/45 pt-4 px-4 sm:px-5">
           <button
             type="button"
             onClick={() => {
@@ -100,7 +106,7 @@ export default function LoginPage() {
               setError("");
               setDone("");
             }}
-            className={btnSecondary}
+            className={`${btnSecondary} w-full sm:w-auto`}
           >
             {isRegister ? "Already have an account? Log in" : "Need an account? Register"}
           </button>
@@ -108,12 +114,12 @@ export default function LoginPage() {
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800">
+        <div className="fut-alert-error">
           {error}
         </div>
       )}
       {done && (
-        <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-green-800">
+        <div className="fut-alert-success">
           {done}
         </div>
       )}

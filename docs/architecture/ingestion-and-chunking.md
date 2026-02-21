@@ -2,7 +2,7 @@
 
 ## Overview
 
-KnowAI ingests documents asynchronously via a Celery pipeline: upload → object store → DB record → parse → chunk → embed → index in Qdrant.
+Ragnetic ingests documents asynchronously via a Celery pipeline: upload → object store → DB record → parse → chunk → embed → index in Qdrant.
 
 ## Document Types and Parsers
 
@@ -26,4 +26,5 @@ Parsers are selected by MIME type or file extension. They return plain text and 
 
 ## Idempotency and Dedup
 
-- `content_hash` (SHA-256) is stored for future duplicate detection; re-upload of the same file can be treated as no-op or update depending on policy.
+- `content_hash` (SHA-256) is stored and checked at upload time.
+- Re-uploading identical content into the same knowledge base returns the existing `document_id` (`deduplicated=true`) instead of re-enqueueing ingestion.

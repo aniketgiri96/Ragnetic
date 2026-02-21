@@ -1,8 +1,8 @@
-# KnowAI
+# Ragnetic
 
 **Open-Source RAG Knowledge Base Platform**
 
-KnowAI is a self-hosted, enterprise-ready Retrieval-Augmented Generation (RAG) platform. It allows organizations to deploy a private, controllable AI system that reasons over proprietary data in minutes, without vendor lock-in or leaking data to third-party cloud APIs.
+Ragnetic is a self-hosted, enterprise-ready Retrieval-Augmented Generation (RAG) platform. It allows organizations to deploy a private, controllable AI system that reasons over proprietary data in minutes, without vendor lock-in or leaking data to third-party cloud APIs.
 
 ## Features
 
@@ -22,8 +22,8 @@ KnowAI is a self-hosted, enterprise-ready Retrieval-Augmented Generation (RAG) p
 ### Run Locally
 1. Clone the repository:
    ```bash
-   git clone https://github.com/knowai/knowai.git
-   cd knowai
+   git clone https://github.com/ragnetic/ragnetic.git
+   cd ragnetic
    ```
 2. Start the services:
    ```bash
@@ -31,10 +31,10 @@ KnowAI is a self-hosted, enterprise-ready Retrieval-Augmented Generation (RAG) p
    ```
 3. (Optional) Pull an Ollama model for RAG Chat. After the stack is up, run:
    ```bash
-   docker exec -it knowai-ollama ollama run llama3.2
+   docker exec -it ragnetic-ollama ollama run llama3.2
    ```
    Exit the model prompt with `/bye`. Chat will use this model; you can change `OLLAMA_MODEL` in `docker-compose.yml` and pull a different model (e.g. `ollama run mistral`).
-4. Access the KnowAI Dashboard:
+4. Access the Ragnetic Dashboard:
    Navigate to [http://localhost:3000](http://localhost:3000)
 
 5. Access the Backend API Docs:
@@ -44,9 +44,9 @@ KnowAI is a self-hosted, enterprise-ready Retrieval-Augmented Generation (RAG) p
 
 High-level view of what you're building:
 
-![KnowAI architecture](assets/knowai-architecture-diagram.png)
+See [Visual architecture](docs/architecture/diagram.md) for system and flow diagrams.
 
-KnowAI uses a modern, scalable stack:
+Ragnetic uses a modern, scalable stack:
 - **Frontend**: Next.js 14, TailwindCSS, Shadcn UI
 - **Backend**: Python 3.11+, FastAPI, Celery
 - **Database**: PostgreSQL 15 (User Auth, Metadata)
@@ -61,11 +61,14 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for deta
 
 ## Documentation
 
+- [Documentation index](docs/README.md)
+- [Docs quickstart](docs/guides/quickstart.md)
 - [Vision and goals](docs/vision-and-goals.md)
 - [Product overview](docs/product-overview.md) · [Personas](docs/personas.md)
 - [Market and competitors](docs/market-and-competitors.md)
-- [Architecture](docs/architecture/tech-stack.md) · [Data flows](docs/architecture/data-flows.md)
-- [Reference: hardware and models](docs/reference/hardware-and-models.md)
+- [Architecture](docs/architecture/tech-stack.md) · [Data flows](docs/architecture/data-flows.md) · [Visual diagram](docs/architecture/diagram.md)
+- [Guides: auth and first query](docs/guides/auth-and-first-query.md) · [Configuration](docs/guides/configuration.md) · [Troubleshooting](docs/guides/troubleshooting.md)
+- [Reference: API endpoints](docs/reference/api-endpoints.md) · [Hardware and models](docs/reference/hardware-and-models.md)
 
 ## License
 

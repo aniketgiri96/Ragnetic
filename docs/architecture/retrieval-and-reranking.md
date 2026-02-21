@@ -2,15 +2,18 @@
 
 ## Current Implementation
 
-- **Vector search:** Query is embedded with the same model as documents; Qdrant returns top-K by cosine similarity.
-- **Collection:** One Qdrant collection per knowledge base and embedding model version (`knowai_kb{id}_v1`).
-- **Search API:** `GET /search/?query=...&kb_id=...` embeds the query and searches the KB’s collection; returns snippets, scores, and metadata.
+- **Hybrid retrieval:** Dense vector search (Qdrant cosine) plus sparse lexical scoring (BM25 over a bounded corpus snapshot).
+- **Fusion:** Dense and sparse ranks are merged with Reciprocal Rank Fusion (RRF).
+- **Optional reranking:** Top-N fused candidates are reranked with a local cross-encoder (`cross-encoder/ms-marco-MiniLM-L-6-v2`) when `sentence-transformers` is available.
+- **Collection model:** One Qdrant collection per knowledge base and embedding model version (`ragnetic_kb{id}_v1`).
+- **Search API:** `GET /search/?query=...&kb_id=...` returns snippet, fused score, dense score, sparse score, and metadata.
 
-## Planned (PRD)
+## Configurable Parameters
 
-- **Hybrid retrieval:** Dense (Qdrant) + sparse (BM25) in parallel; merge with Reciprocal Rank Fusion (RRF).
-- **Reranking:** Top-20 from hybrid → cross-encoder rerank → top-5.
-- **Query expansion:** Optional HyDE (hypothetical document embeddings) for vague queries.
+- `RETRIEVAL_TOP_K` (default `5`)
+- `RETRIEVAL_DENSE_LIMIT` (default `30`)
+- `RETRIEVAL_SPARSE_POOL` (default `800`)
+- `RETRIEVAL_RERANK_TOP_N` (default `12`)
 
 ## Context Assembly
 
