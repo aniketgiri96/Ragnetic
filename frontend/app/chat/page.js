@@ -3,15 +3,14 @@
 import { useState, useEffect } from "react";
 import { listKb, chat } from "../../lib/api.js";
 
-const inputClass =
-  "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 min-h-[2.5rem]";
-const labelClass = "mb-1 block text-sm font-medium text-slate-700";
-const btnPrimary =
-  "min-h-[2.5rem] cursor-pointer rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
+const inputClass = "fut-input";
+const labelClass = "fut-label";
+const btnPrimary = "fut-btn";
 
 export default function ChatPage() {
   const [kbs, setKbs] = useState([]);
   const [kbId, setKbId] = useState("");
+  const [sessionId, setSessionId] = useState("");
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -23,8 +22,27 @@ export default function ChatPage() {
         setKbs(data);
         if (data.length && !kbId) setKbId(String(data[0].id));
       })
-      .catch(() => setError("Failed to load knowledge bases."));
+      .catch((err) => {
+        if (err?.status === 401) setError("Please log in to access chat.");
+        else setError("Failed to load knowledge bases.");
+      });
   }, []);
+
+  useEffect(() => {
+    if (!kbId || typeof window === "undefined") return;
+    const key = `ragnetic_chat_session_${kbId}`;
+    const existing = localStorage.getItem(key);
+    if (existing) {
+      setSessionId(existing);
+      return;
+    }
+    const generated =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem(key, generated);
+    setSessionId(generated);
+  }, [kbId]);
 
   const handleSend = async (e) => {
     e.preventDefault();
@@ -38,16 +56,22 @@ export default function ChatPage() {
       const res = await chat({
         message: userMsg,
         kb_id: kbId ? parseInt(kbId, 10) : undefined,
+        session_id: sessionId || undefined,
       });
+      if (res.session_id && kbId && typeof window !== "undefined") {
+        localStorage.setItem(`ragnetic_chat_session_${kbId}`, res.session_id);
+        setSessionId(res.session_id);
+      }
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: res.answer, sources: res.sources || [] },
       ]);
     } catch (err) {
-      setError(err.message);
+      if (err?.status === 401) setError("Please log in to chat.");
+      else setError(err?.message || "Chat failed");
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `Error: ${err.message}`, sources: [] },
+        { role: "assistant", content: `Error: ${err?.message || "Chat failed"}`, sources: [] },
       ]);
     } finally {
       setLoading(false);
@@ -56,10 +80,14 @@ export default function ChatPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-slate-900">Chat</h1>
+      <section className="page-head">
+        <p className="page-kicker">Assistant</p>
+        <h1 className="page-title">Grounded chat</h1>
+        <p className="page-subtitle">Ask questions against your selected knowledge base and review source snippets.</p>
+      </section>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <form onSubmit={handleSend} className="space-y-4">
+      <div className="ui-card space-y-4">
+        <div className="ui-grid-two">
           <div>
             <label htmlFor="chat-kb" className={labelClass}>
               Knowledge base
@@ -71,65 +99,98 @@ export default function ChatPage() {
               className={inputClass}
             >
               {kbs.map((kb) => (
-                <option key={kb.id} value={kb.id}>{kb.name}</option>
+                <option key={kb.id} value={kb.id}>
+                  {kb.name}{kb.role ? ` (${kb.role})` : ""}
+                </option>
               ))}
             </select>
           </div>
-          <div className="flex gap-2">
-            <input
-              id="chat-message"
-              type="text"
-              placeholder="Ask a question..."
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              disabled={loading}
-              className={inputClass}
-              aria-label="Message"
-            />
-            <button type="submit" disabled={loading} className={btnPrimary}>
-              {loading ? "Sending…" : "Send"}
+          <div className="flex items-end justify-start sm:justify-end gap-2">
+            <button
+              type="button"
+              className="fut-btn-ghost"
+              onClick={() => {
+                if (!kbId || typeof window === "undefined") return;
+                const generated =
+                  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                    ? crypto.randomUUID()
+                    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                localStorage.setItem(`ragnetic_chat_session_${kbId}`, generated);
+                setSessionId(generated);
+                setMessages([]);
+              }}
+            >
+              New thread
             </button>
+            {sessionId && <p className="text-xs text-slate-500">Session: {sessionId.slice(0, 12)}...</p>}
           </div>
-        </form>
-      </div>
-
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800">
-          {error}
         </div>
-      )}
 
-      <div className="space-y-4">
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`rounded-xl border p-4 ${
-              m.role === "user"
-                ? "ml-0 mr-4 border-blue-200 bg-blue-50"
-                : "ml-4 mr-0 border-slate-200 bg-slate-50"
-            }`}
-          >
-            <p className="text-sm font-semibold text-slate-700">
-              {m.role === "user" ? "You" : "Assistant"}
-            </p>
-            <div className="mt-1 text-slate-800 whitespace-pre-wrap">{m.content}</div>
-            {m.sources?.length > 0 && (
-              <div className="mt-3 rounded-lg border border-slate-200 bg-white p-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Sources
-                </p>
-                <ul className="mt-2 space-y-2">
-                  {m.sources.map((s, j) => (
-                    <li key={j} className="text-sm text-slate-600">
-                      {s.snippet?.slice(0, 200)}
-                      {(s.snippet?.length ?? 0) > 200 && "…"}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+        {error && (
+          <div className="fut-alert-error">
+            {error}
+            {error.startsWith("Please log in") && (
+              <>
+                {" "}
+                <a href="/login" className="font-medium underline text-slate-900">
+                  Log in
+                </a>
+              </>
             )}
           </div>
-        ))}
+        )}
+
+        <div className="chat-thread">
+          {messages.length === 0 ? (
+            <div className="fut-alert-info">
+              No conversation yet. Ask a question to begin.
+            </div>
+          ) : (
+            <ol className="chat-message-list">
+              {messages.map((m, i) => (
+                <li key={i} className={`chat-message-item ${m.role === "user" ? "is-user" : "is-assistant"}`}>
+                  <div className="chat-message-head">
+                    <p>{m.role === "user" ? "You" : "Assistant"}</p>
+                    <span>#{String(i + 1).padStart(2, "0")}</span>
+                  </div>
+                  <p className="chat-message-body">{m.content}</p>
+                  {m.sources?.length > 0 && (
+                    <div className="chat-source-box">
+                      <p className="chat-source-title">Sources</p>
+                      <ul>
+                        {m.sources.map((s, j) => (
+                          <li key={j}>
+                            {s.snippet?.slice(0, 180)}
+                            {(s.snippet?.length ?? 0) > 180 && "..."}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+
+        <form onSubmit={handleSend} className="chat-composer">
+          <label htmlFor="chat-message" className={`${labelClass} sr-only`}>
+            Message
+          </label>
+          <input
+            id="chat-message"
+            type="text"
+            placeholder="Ask your knowledge base..."
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            disabled={loading}
+            className={inputClass}
+            aria-label="Message"
+          />
+          <button type="submit" disabled={loading} className={btnPrimary}>
+            {loading ? "Sending..." : "Send"}
+          </button>
+        </form>
       </div>
     </div>
   );

@@ -7,6 +7,8 @@ from app.ingestion.embedding import embed_texts
 from app.ingestion.parsers import parse_document
 from app.models.base import SessionLocal, Base
 from app.models.document import Document, DocumentStatus
+from app.models.user import User  # noqa: F401 - ensure mapper registration for relationships
+from app.core.config import settings
 from app.services.qdrant_client import ensure_collection, upsert_chunks, collection_name
 from app.services.storage import get_stream
 from qdrant_client.models import PointStruct
@@ -49,7 +51,13 @@ def ingest_document(self, document_id: int) -> dict:
     text, parse_meta = parse_document(content, filename)
     self.update_state(state="PROCESSING", meta={"progress": 30})
 
-    chunks = chunk_text(text, metadata_base={"source": doc.filename, "doc_id": document_id, **parse_meta})
+    chunks = chunk_text(
+        text,
+        max_chunk_chars=settings.chunk_max_chars,
+        overlap_chars=settings.chunk_overlap_chars,
+        min_chunk_chars=settings.chunk_min_chars,
+        metadata_base={"source": doc.filename, "doc_id": document_id, **parse_meta},
+    )
     if not chunks:
         _update_doc_status(document_id, DocumentStatus.INDEXED)
         return {"document_id": document_id, "status": "indexed", "chunks": 0}

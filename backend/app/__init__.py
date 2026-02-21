@@ -1,1 +1,1 @@
-# KnowAI Backend Application
+# Ragnetic Backend Application

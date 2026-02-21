@@ -1,6 +1,6 @@
-# Contributing to KnowAI
+# Contributing to Ragnetic
 
-First off, thank you for considering contributing to KnowAI! It's people like you that make KnowAI a great tool for the open-source community.
+First off, thank you for considering contributing to Ragnetic! It's people like you that make Ragnetic a great tool for the open-source community.
 
 ## Development Setup
 

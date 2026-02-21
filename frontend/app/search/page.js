@@ -4,10 +4,9 @@ import { useState, useEffect } from "react";
 import { listKb, search } from "../../lib/api.js";
 
 const inputClass =
-  "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 min-h-[2.5rem]";
-const labelClass = "mb-1 block text-sm font-medium text-slate-700";
-const btnPrimary =
-  "min-h-[2.5rem] cursor-pointer rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
+  "fut-input";
+const labelClass = "fut-label";
+const btnPrimary = "fut-btn";
 
 export default function SearchPage() {
   const [kbs, setKbs] = useState([]);
@@ -23,7 +22,10 @@ export default function SearchPage() {
         setKbs(data);
         if (data.length && !kbId) setKbId(String(data[0].id));
       })
-      .catch(() => setError("Failed to load knowledge bases."));
+      .catch((err) => {
+        if (err?.status === 401) setError("Please log in to access search.");
+        else setError("Failed to load knowledge bases.");
+      });
   }, []);
 
   const handleSearch = async (e) => {
@@ -35,7 +37,8 @@ export default function SearchPage() {
       const data = await search(query, kbId ? parseInt(kbId, 10) : undefined);
       setResults(Array.isArray(data) ? data : []);
     } catch (err) {
-      setError(err.message);
+      if (err?.status === 401) setError("Please log in to search.");
+      else setError(err?.message || "Search failed");
       setResults([]);
     } finally {
       setLoading(false);
@@ -44,63 +47,91 @@ export default function SearchPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-slate-900">Search</h1>
+      <section className="page-head">
+        <p className="page-kicker">Retrieval</p>
+        <h1 className="page-title">Search indexed content</h1>
+        <p className="page-subtitle">Run semantic + sparse retrieval and inspect score signals.</p>
+      </section>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="ui-card">
         <form onSubmit={handleSearch} className="space-y-4">
-          <div>
-            <label htmlFor="search-kb" className={labelClass}>
-              Knowledge base
-            </label>
-            <select
-              id="search-kb"
-              value={kbId}
-              onChange={(e) => setKbId(e.target.value)}
-              className={inputClass}
-            >
-              {kbs.map((kb) => (
-                <option key={kb.id} value={kb.id}>{kb.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="search-query" className={labelClass}>
-              Query
-            </label>
-            <input
-              id="search-query"
-              type="text"
-              placeholder="Search your documents..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className={inputClass}
-            />
+          <div className="ui-grid-two">
+            <div>
+              <label htmlFor="search-kb" className={labelClass}>
+                Knowledge base
+              </label>
+              <select
+                id="search-kb"
+                value={kbId}
+                onChange={(e) => setKbId(e.target.value)}
+                className={inputClass}
+              >
+                {kbs.map((kb) => (
+                  <option key={kb.id} value={kb.id}>
+                    {kb.name}{kb.role ? ` (${kb.role})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="search-query" className={labelClass}>
+                Query
+              </label>
+              <input
+                id="search-query"
+                type="text"
+                placeholder="Search your documents..."
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                className={inputClass}
+              />
+            </div>
           </div>
           <button type="submit" disabled={loading} className={btnPrimary}>
-            {loading ? "Searching…" : "Search"}
+            {loading ? "Searching..." : "Search"}
           </button>
         </form>
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800">
+        <div className="fut-alert-error">
           {error}
+          {error.startsWith("Please log in") && (
+            <>
+              {" "}
+              <a href="/login" className="font-medium underline text-slate-900">
+                Log in
+              </a>
+            </>
+          )}
         </div>
       )}
 
-      <ul className="space-y-3">
-        {results.map((r, i) => (
-          <li
-            key={i}
-            className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
-          >
-            <p className="text-slate-800">{r.snippet}</p>
-            {r.score != null && (
-              <p className="mt-2 text-sm text-slate-500">Score: {r.score.toFixed(3)}</p>
-            )}
-          </li>
-        ))}
-      </ul>
+      {results.length > 0 ? (
+        <ul className="ui-result-list">
+          {results.map((r, i) => (
+            <li
+              key={i}
+              className={`ui-result-item ${i === results.length - 1 ? "is-last" : ""}`}
+            >
+              <p className="text-slate-900">{r.snippet}</p>
+              {r.score != null && (
+                <div className="ui-score-row">
+                  <span className="ui-score-chip">score {r.score.toFixed(3)}</span>
+                  {r.dense_score != null && <span className="ui-score-chip">dense {Number(r.dense_score).toFixed(3)}</span>}
+                  {r.sparse_score != null && <span className="ui-score-chip">sparse {Number(r.sparse_score).toFixed(3)}</span>}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        query.trim() && !loading && !error && (
+          <div className="fut-alert-info">
+            No matches found for this query.
+          </div>
+        )
+      )}
     </div>
   );
 }

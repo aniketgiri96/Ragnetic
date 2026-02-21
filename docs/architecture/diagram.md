@@ -1,4 +1,4 @@
-# KnowAI — Visual Architecture
+# Ragnetic — Visual Architecture
 
 ## System overview
 

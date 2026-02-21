@@ -4,10 +4,9 @@ import { useState, useEffect } from "react";
 import { listKb, uploadFile, documentStatus } from "../../lib/api.js";
 
 const inputClass =
-  "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 min-h-[2.5rem]";
-const labelClass = "mb-1 block text-sm font-medium text-slate-700";
-const btnPrimary =
-  "min-h-[2.5rem] cursor-pointer rounded-lg bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
+  "fut-input";
+const labelClass = "fut-label";
+const btnPrimary = "fut-btn";
 
 export default function UploadPage() {
   const [kbs, setKbs] = useState([]);
@@ -23,7 +22,10 @@ export default function UploadPage() {
         setKbs(data);
         if (data.length && !kbId) setKbId(String(data[0].id));
       })
-      .catch(() => setStatus("Failed to load knowledge bases."));
+      .catch((err) => {
+        if (err?.status === 401) setStatus("Please log in to access knowledge bases.");
+        else setStatus("Failed to load knowledge bases.");
+      });
   }, []);
 
   useEffect(() => {
@@ -47,51 +49,62 @@ export default function UploadPage() {
     setStatus("Uploading...");
     try {
       const res = await uploadFile(file, kbId ? parseInt(kbId, 10) : undefined);
-      setStatus(`Queued. Document ID: ${res.document_id}`);
+      if (res.deduplicated) {
+        setStatus(`Already indexed/queued (deduplicated). Document ID: ${res.document_id}`);
+      } else {
+        setStatus(`Queued. Document ID: ${res.document_id}`);
+      }
       setDocId(res.document_id);
       if (res.document_id) setPolling(true);
     } catch (err) {
-      const msg = err.message || "";
-      if (msg.includes("401") || msg.includes("authenticated") || msg.toLowerCase().includes("unauthorized"))
+      if (err?.status === 401)
         setStatus("Please log in to upload.");
       else
-        setStatus(`Error: ${err.message}`);
+        setStatus(`Error: ${err?.message || "Upload failed"}`);
     }
   };
 
-  const isAuthError = status === "Please log in to upload.";
+  const isAuthError = status.startsWith("Please log in");
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-slate-900">Upload document</h1>
+      <section className="page-head">
+        <p className="page-kicker">Ingestion</p>
+        <h1 className="page-title">Upload documents</h1>
+        <p className="page-subtitle">Attach files, queue indexing, and track document status.</p>
+      </section>
 
-      <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="ui-card">
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label htmlFor="upload-kb" className={labelClass}>
-              Knowledge base
-            </label>
-            <select
-              id="upload-kb"
-              value={kbId}
-              onChange={(e) => setKbId(e.target.value)}
-              className={inputClass}
-            >
-              {kbs.map((kb) => (
-                <option key={kb.id} value={kb.id}>{kb.name}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="upload-file" className={labelClass}>
-              File
-            </label>
-            <input
-              id="upload-file"
-              type="file"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="block w-full text-sm text-slate-600 file:mr-4 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-blue-700 hover:file:bg-blue-100"
-            />
+          <div className="ui-grid-two">
+            <div>
+              <label htmlFor="upload-kb" className={labelClass}>
+                Knowledge base
+              </label>
+              <select
+                id="upload-kb"
+                value={kbId}
+                onChange={(e) => setKbId(e.target.value)}
+                className={inputClass}
+              >
+                {kbs.map((kb) => (
+                  <option key={kb.id} value={kb.id}>
+                    {kb.name}{kb.role ? ` (${kb.role})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="upload-file" className={labelClass}>
+                File
+              </label>
+              <input
+                id="upload-file"
+                type="file"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                className="ui-file-input"
+              />
+            </div>
           </div>
           <button type="submit" disabled={!file} className={btnPrimary}>
             Upload
@@ -101,19 +114,19 @@ export default function UploadPage() {
 
       {status && (
         <div
-          className={`rounded-lg border p-3 ${
+          className={`${
             isAuthError
-              ? "border-amber-200 bg-amber-50 text-amber-800"
+              ? "fut-alert-warn"
               : status.startsWith("Error") || status.startsWith("Failed")
-                ? "border-red-200 bg-red-50 text-red-800"
-                : "border-slate-200 bg-slate-50 text-slate-700"
+                ? "fut-alert-error"
+                : "fut-alert-info"
           }`}
         >
           {status}
           {isAuthError && (
             <>
               {" "}
-              <a href="/login" className="font-medium text-blue-600 underline hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded">
+              <a href="/login" className="font-medium underline text-slate-900">
                 Log in
               </a>
             </>
