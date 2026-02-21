@@ -1,6 +1,7 @@
 """Hybrid retrieval and optional reranking for RAG queries."""
 from __future__ import annotations
 
+from functools import lru_cache
 import math
 import re
 from dataclasses import dataclass
@@ -90,6 +91,8 @@ def _rrf_fuse(dense_rank: dict[str, int], sparse_rank: dict[str, int]) -> dict[s
 
 def _optional_cross_encoder_score(query: str, docs: list[str]) -> list[float] | None:
     """Return cross-encoder scores when dependency is available."""
+    if not settings.retrieval_enable_cross_encoder:
+        return None
     global _cross_encoder
     try:
         from sentence_transformers import CrossEncoder
@@ -104,9 +107,14 @@ def _optional_cross_encoder_score(query: str, docs: list[str]) -> list[float] | 
         return None
 
 
+@lru_cache(maxsize=2048)
+def _query_embedding(query: str) -> tuple[float, ...]:
+    return tuple(embed_texts([query])[0])
+
+
 def _dense_search(kb_id: int, query: str, limit: int) -> list[Candidate]:
     coll = ensure_collection(kb_id)
-    vector = embed_texts([query])[0]
+    vector = list(_query_embedding(query.strip()))
     hits = search_collection(collection=coll, vector=vector, limit=limit)
     out: list[Candidate] = []
     for h in hits:
@@ -169,11 +177,11 @@ def hybrid_retrieve(
     """Hybrid retrieve with dense + BM25 sparse + RRF and optional reranking."""
     top_k = top_k or settings.retrieval_top_k
     dense_limit = dense_limit or settings.retrieval_dense_limit
-    sparse_pool = sparse_pool or settings.retrieval_sparse_pool
+    sparse_pool = sparse_pool if sparse_pool is not None else settings.retrieval_sparse_pool
     rerank_top_n = rerank_top_n or settings.retrieval_rerank_top_n
 
     dense_hits = _dense_search(kb_id, query, dense_limit)
-    sparse_corpus = _scroll_candidates(kb_id, max_points=sparse_pool)
+    sparse_corpus = _scroll_candidates(kb_id, max_points=sparse_pool) if sparse_pool and sparse_pool > 0 else []
 
     # Sparse ranking over bounded corpus snapshot.
     sparse_scores = _bm25_scores(query, [c.text for c in sparse_corpus])

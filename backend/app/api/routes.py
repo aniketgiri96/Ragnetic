@@ -257,9 +257,11 @@ async def chat_rag(user: User, message: str, kb_id: int | None = None, session_i
         session = _get_or_create_chat_session(db, user_id=user.id, kb_id=kb, session_id=session_key)
         history = _history_for_prompt(db, session_key, max_messages=10)
 
-        sources: list[dict[str, Any]] = _retrieve_for_chat(kb, message)
+        source_limit = max(1, settings.chat_context_max_sources)
+        sources: list[dict[str, Any]] = _retrieve_for_chat(kb, message, limit=source_limit)
+        source_char_limit = max(120, settings.chat_context_max_chars_per_source)
         context_blocks = "\n\n---\n\n".join(
-            f"[Source {i+1}]\n{s['snippet']}" for i, s in enumerate(sources)
+            f"[Source {i+1}]\n{(s['snippet'] or '')[:source_char_limit]}" for i, s in enumerate(sources)
         )
         if not context_blocks:
             answer = "No relevant documents found in the selected knowledge base yet. Upload documents and try again."

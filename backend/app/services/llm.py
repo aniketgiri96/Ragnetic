@@ -21,6 +21,10 @@ async def _generate_ollama(prompt: str, system: str | None = None) -> str:
         "model": settings.ollama_model,
         "prompt": full_prompt,
         "stream": False,
+        "options": {
+            "num_predict": int(settings.ollama_num_predict),
+            "temperature": float(settings.ollama_temperature),
+        },
     }
     timeout = httpx.Timeout(
         timeout=float(settings.llm_timeout_seconds),
