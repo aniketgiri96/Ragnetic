@@ -17,6 +17,11 @@ const features = [
     href: "/chat",
   },
   {
+    title: "Members",
+    description: "Share knowledge bases with editors and viewers",
+    href: "/members",
+  },
+  {
     title: "API docs",
     description: "REST API reference",
     href: `${API_URL}/docs`,
@@ -26,33 +31,41 @@ const features = [
 
 export default function Home() {
   return (
-    <div className="space-y-12">
-      <section className="text-center space-y-4">
-        <h1 className="text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl">
-          KnowAI
-        </h1>
-        <p className="text-xl text-slate-600">
-          Open-Source RAG Knowledge Base Platform
+    <div className="space-y-14">
+      <section className="space-y-5 fut-fade-up">
+        <p className="fut-kicker">
+          Private AI Infrastructure
         </p>
-        <p className="text-slate-500">
-          Deploy in 5 minutes. Own your data. No vendor lock-in.
+        <h1 className="fut-title text-5xl sm:text-6xl flex flex-wrap items-end gap-3">
+          <span className="fut-script text-7xl sm:text-8xl text-slate-900">Ragnetic</span>
+          <span className="fut-title-gradient">Command Layer</span>
+        </h1>
+        <p className="max-w-2xl text-lg text-slate-700">
+          Open-source RAG platform for teams that want futuristic UX with strict control over data, models, and retrieval behavior.
+        </p>
+        <p className="max-w-xl text-sm text-slate-600">
+          Deploy in minutes. Keep proprietary knowledge private. Share searchable and chat-ready KBs across your organization.
         </p>
       </section>
 
-      <section>
+      <section className="fut-panel max-w-5xl">
         <h2 className="sr-only">Get started</h2>
-        <ul className="grid gap-4 sm:grid-cols-2">
-          {features.map((item) => (
-            <li key={item.href}>
+        <ul className="space-y-0">
+          {features.map((item, idx) => (
+            <li key={item.href} className="fut-fade-up" style={{ animationDelay: `${idx * 60}ms` }}>
               <a
                 href={item.href}
                 target={item.external ? "_blank" : undefined}
                 rel={item.external ? "noopener noreferrer" : undefined}
-                className="block rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-blue-200 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                className={`fut-card block focus:outline-none focus:ring-2 focus:ring-cyan-400/70 ${idx === features.length - 1 ? "border-b-0" : ""}`}
               >
-                <span className="text-lg font-semibold text-slate-900">
-                  {item.title}
-                </span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-[0.24em] text-cyan-700/80">Module {String(idx + 1).padStart(2, "0")}</p>
+                    <span className="mt-1 block text-xl font-semibold text-slate-900">{item.title}</span>
+                  </div>
+                  <span className="text-cyan-700/80 text-sm uppercase tracking-[0.22em]">Open</span>
+                </div>
                 <p className="mt-2 text-sm text-slate-600">{item.description}</p>
               </a>
             </li>
