@@ -26,10 +26,14 @@ async def _generate_ollama(prompt: str, system: str | None = None) -> str:
         timeout=float(settings.llm_timeout_seconds),
         connect=float(settings.llm_connect_timeout_seconds),
     )
+    model_check_timeout = httpx.Timeout(
+        timeout=float(settings.llm_model_check_timeout_seconds),
+        connect=float(settings.llm_connect_timeout_seconds),
+    )
     async with httpx.AsyncClient(timeout=timeout) as client:
         # Fast-fail if the configured model is not available locally.
         try:
-            tags_resp = await client.get(tags_url)
+            tags_resp = await client.get(tags_url, timeout=model_check_timeout)
             if tags_resp.status_code == 200:
                 data = tags_resp.json()
                 models = data.get("models") or []
