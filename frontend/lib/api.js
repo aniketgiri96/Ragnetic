@@ -118,3 +118,27 @@ export async function removeKbMember(kbId, memberUserId) {
   await throwForError(res);
   return res.json();
 }
+
+export async function listChatSessions(kbId) {
+  const params = new URLSearchParams();
+  if (kbId != null) params.set("kb_id", String(kbId));
+  const url = params.toString() ? `${API}/chat/sessions?${params}` : `${API}/chat/sessions`;
+  const res = await fetch(url, { headers: getHeaders() });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function getChatSession(sessionId, limit = 100) {
+  const res = await fetch(`${API}/chat/sessions/${encodeURIComponent(sessionId)}?limit=${limit}`, { headers: getHeaders() });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function deleteChatSession(sessionId) {
+  const res = await fetch(`${API}/chat/sessions/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+    headers: getHeaders(),
+  });
+  await throwForError(res);
+  return res.json();
+}

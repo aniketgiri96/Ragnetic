@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2"
-    llm_timeout_seconds: int = 15
+    llm_timeout_seconds: int = 90
     llm_connect_timeout_seconds: int = 5
     openai_api_key: Optional[str] = None
     retrieval_top_k: int = 5

@@ -1,14 +1,18 @@
 """API routes for upload, search, and chat."""
+from datetime import datetime
 import hashlib
 import io
+import re
 import uuid
 from typing import Any
 
 from fastapi import File, Query, UploadFile
 from fastapi import HTTPException, status
 from fastapi.responses import HTMLResponse
+from sqlalchemy import desc
 
 from app.models.base import SessionLocal
+from app.models.chat import ChatMessage, ChatRole, ChatSession
 from app.models.document import Document, DocumentStatus, KnowledgeBaseMembership, KnowledgeBaseRole
 from app.models.user import User
 from app.core.config import settings
@@ -23,6 +27,56 @@ VALID_KB_ROLES = {
     KnowledgeBaseRole.EDITOR,
     KnowledgeBaseRole.VIEWER,
 }
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+
+def _normalize_session_id(session_id: str | None) -> str:
+    if session_id is None:
+        return uuid.uuid4().hex
+    normalized = session_id.strip()
+    if not normalized:
+        return uuid.uuid4().hex
+    if not SESSION_ID_RE.match(normalized):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="session_id must be 1-128 chars and contain only letters, numbers, ., _, :, -",
+        )
+    return normalized
+
+
+def _get_or_create_chat_session(db, user_id: int, kb_id: int, session_id: str) -> ChatSession:
+    session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+    if session:
+        if session.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        if session.knowledge_base_id != kb_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Session belongs to a different knowledge base.",
+            )
+        return session
+    session = ChatSession(id=session_id, user_id=user_id, knowledge_base_id=kb_id)
+    db.add(session)
+    db.flush()
+    return session
+
+
+def _history_for_prompt(db, session_id: str, max_messages: int = 10) -> str:
+    rows = (
+        db.query(ChatMessage)
+        .filter(ChatMessage.session_id == session_id)
+        .order_by(desc(ChatMessage.id))
+        .limit(max_messages)
+        .all()
+    )
+    if not rows:
+        return ""
+    ordered = list(reversed(rows))
+    lines = []
+    for msg in ordered:
+        speaker = "User" if msg.role == ChatRole.USER else "Assistant"
+        lines.append(f"{speaker}: {msg.content}")
+    return "\n".join(lines)
 
 
 def _resolve_kb_for_user(user: User, kb_id: int | None, min_role: str) -> int:
@@ -123,37 +177,53 @@ def _retrieve_for_chat(kb_id: int, query: str, limit: int = 5) -> list[dict[str,
 async def chat_rag(user: User, message: str, kb_id: int | None = None, session_id: str | None = None) -> dict:
     """RAG chat: retrieve chunks, build prompt, call LLM, return answer + sources."""
     kb = _resolve_kb_for_user(user, kb_id, min_role=KnowledgeBaseRole.VIEWER)
-    sources: list[dict[str, Any]] = _retrieve_for_chat(kb, message)
-    context_blocks = "\n\n---\n\n".join(
-        f"[Source {i+1}]\n{s['snippet']}" for i, s in enumerate(sources)
-    )
-    if not context_blocks:
-        return {
-            "answer": "No relevant documents found in the selected knowledge base yet. Upload documents and try again.",
-            "sources": [],
-        }
-    system = (
-        "Answer only using the following context. "
-        "If the context does not contain enough information, say so. "
-        "Mention which source number you use when possible."
-    )
-    user_prompt = f"Context:\n\n{context_blocks}\n\nQuestion: {message}"
+    session_key = _normalize_session_id(session_id)
+    db = SessionLocal()
     try:
-        answer = await llm_generate(user_prompt, system=system)
-    except Exception as e:
-        detail = str(e).strip() or e.__class__.__name__
-        if sources:
-            excerpt = (sources[0].get("snippet") or "").strip().replace("\n", " ")
-            excerpt = excerpt[:400] + ("..." if len(excerpt) > 400 else "")
-            answer = (
-                f"LLM unavailable ({detail}). Using top retrieved source instead: {excerpt}"
-            )
-        else:
-            answer = (
-                f"(LLM error: {detail}. Ensure Ollama is running with model "
-                f"'{settings.ollama_model}' or set OPENAI_API_KEY.)"
-            )
-    return {"answer": answer, "sources": sources}
+        session = _get_or_create_chat_session(db, user_id=user.id, kb_id=kb, session_id=session_key)
+        history = _history_for_prompt(db, session_key, max_messages=10)
+
+        sources: list[dict[str, Any]] = _retrieve_for_chat(kb, message)
+        context_blocks = "\n\n---\n\n".join(
+            f"[Source {i+1}]\n{s['snippet']}" for i, s in enumerate(sources)
+        )
+        if not context_blocks:
+            answer = "No relevant documents found in the selected knowledge base yet. Upload documents and try again."
+            db.add(ChatMessage(session_id=session_key, role=ChatRole.USER, content=message))
+            db.add(ChatMessage(session_id=session_key, role=ChatRole.ASSISTANT, content=answer))
+            session.updated_at = datetime.utcnow()
+            db.commit()
+            return {"answer": answer, "sources": [], "session_id": session_key}
+
+        system = (
+            "Answer only using the provided context blocks for factual claims. "
+            "Use conversation history only for continuity. "
+            "If context is insufficient, explicitly say so and do not fabricate facts. "
+            "Mention source numbers when possible."
+        )
+        history_block = f"Conversation history:\n{history}\n\n" if history else ""
+        user_prompt = f"{history_block}Context:\n\n{context_blocks}\n\nQuestion: {message}"
+        try:
+            answer = await llm_generate(user_prompt, system=system)
+        except Exception as e:
+            detail = str(e).strip() or e.__class__.__name__
+            if sources:
+                excerpt = (sources[0].get("snippet") or "").strip().replace("\n", " ")
+                excerpt = excerpt[:400] + ("..." if len(excerpt) > 400 else "")
+                answer = f"LLM unavailable ({detail}). Using top retrieved source instead: {excerpt}"
+            else:
+                answer = (
+                    f"(LLM error: {detail}. Ensure Ollama is running with model "
+                    f"'{settings.ollama_model}' or set OPENAI_API_KEY.)"
+                )
+
+        db.add(ChatMessage(session_id=session_key, role=ChatRole.USER, content=message))
+        db.add(ChatMessage(session_id=session_key, role=ChatRole.ASSISTANT, content=answer))
+        session.updated_at = datetime.utcnow()
+        db.commit()
+        return {"answer": answer, "sources": sources, "session_id": session_key}
+    finally:
+        db.close()
 
 
 async def chat(message: str) -> dict:
@@ -184,6 +254,99 @@ def get_document_status(user: User, document_id: int) -> dict | None:
             return None
         require_kb_access(db, user.id, doc.knowledge_base_id, min_role=KnowledgeBaseRole.VIEWER)
         return {"document_id": doc.id, "filename": doc.filename, "status": doc.status, "error_message": doc.error_message}
+    finally:
+        db.close()
+
+
+def list_chat_sessions(user: User, kb_id: int | None = None) -> list[dict]:
+    db = SessionLocal()
+    try:
+        kb_filter = None
+        if kb_id is not None:
+            require_kb_access(db, user.id, kb_id, min_role=KnowledgeBaseRole.VIEWER)
+            kb_filter = kb_id
+
+        q = db.query(ChatSession).filter(ChatSession.user_id == user.id)
+        if kb_filter is not None:
+            q = q.filter(ChatSession.knowledge_base_id == kb_filter)
+        sessions = q.order_by(desc(ChatSession.updated_at), desc(ChatSession.created_at)).all()
+
+        out = []
+        for s in sessions:
+            latest = (
+                db.query(ChatMessage)
+                .filter(ChatMessage.session_id == s.id)
+                .order_by(desc(ChatMessage.id))
+                .first()
+            )
+            count = db.query(ChatMessage).filter(ChatMessage.session_id == s.id).count()
+            out.append(
+                {
+                    "session_id": s.id,
+                    "kb_id": s.knowledge_base_id,
+                    "created_at": s.created_at.isoformat(),
+                    "updated_at": s.updated_at.isoformat(),
+                    "message_count": count,
+                    "last_message_preview": (latest.content[:140] + "...") if latest and len(latest.content) > 140 else (latest.content if latest else ""),
+                }
+            )
+        return out
+    finally:
+        db.close()
+
+
+def get_chat_session(user: User, session_id: str, limit: int = 100) -> dict:
+    db = SessionLocal()
+    try:
+        session = (
+            db.query(ChatSession)
+            .filter(ChatSession.id == session_id, ChatSession.user_id == user.id)
+            .first()
+        )
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        require_kb_access(db, user.id, session.knowledge_base_id, min_role=KnowledgeBaseRole.VIEWER)
+        rows = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == session.id)
+            .order_by(desc(ChatMessage.id))
+            .limit(limit)
+            .all()
+        )
+        messages = [
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "created_at": m.created_at.isoformat(),
+            }
+            for m in reversed(rows)
+        ]
+        return {
+            "session_id": session.id,
+            "kb_id": session.knowledge_base_id,
+            "created_at": session.created_at.isoformat(),
+            "updated_at": session.updated_at.isoformat(),
+            "messages": messages,
+        }
+    finally:
+        db.close()
+
+
+def delete_chat_session(user: User, session_id: str) -> dict:
+    db = SessionLocal()
+    try:
+        session = (
+            db.query(ChatSession)
+            .filter(ChatSession.id == session_id, ChatSession.user_id == user.id)
+            .first()
+        )
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        require_kb_access(db, user.id, session.knowledge_base_id, min_role=KnowledgeBaseRole.VIEWER)
+        db.delete(session)
+        db.commit()
+        return {"message": "Session deleted."}
     finally:
         db.close()
 
