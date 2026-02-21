@@ -2,6 +2,7 @@
 from datetime import datetime
 import hashlib
 import io
+import logging
 import re
 import uuid
 from typing import Any
@@ -28,6 +29,39 @@ VALID_KB_ROLES = {
     KnowledgeBaseRole.VIEWER,
 }
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+TECH_QUERY_RE = re.compile(r"\b(tech stack|technology|technologies|skills?|tools?)\b", re.IGNORECASE)
+TECH_TERMS = [
+    "Python",
+    "JavaScript",
+    "TypeScript",
+    "React",
+    "Next.js",
+    "Material UI",
+    "Tailwind",
+    "FastAPI",
+    "Flask",
+    "Django",
+    "Node.js",
+    "Express",
+    "PostgreSQL",
+    "MySQL",
+    "MongoDB",
+    "Supabase",
+    "Redis",
+    "WebSockets",
+    "SSE",
+    "Docker",
+    "Kubernetes",
+    "AWS",
+    "GCP",
+    "Azure",
+    "Git",
+    "CI/CD",
+    "Jira",
+    "LangChain",
+    "OpenAI",
+]
+logger = logging.getLogger(__name__)
 
 
 def _normalize_session_id(session_id: str | None) -> str:
@@ -170,8 +204,48 @@ def _retrieve_for_chat(kb_id: int, query: str, limit: int = 5) -> list[dict[str,
             {"snippet": r.get("snippet", ""), "metadata": r.get("metadata", {}), "score": r.get("score", 0.0)}
             for r in results
         ]
-    except Exception:
-        return []
+    except Exception as e:
+        logger.exception("Chat retrieval failed for kb_id=%s", kb_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Retrieval backend unavailable: {e}",
+        ) from e
+
+
+def _extract_tech_terms(text: str, max_items: int = 14) -> list[str]:
+    lower = text.lower()
+    found: list[str] = []
+    for term in TECH_TERMS:
+        if term.lower() in lower and term not in found:
+            found.append(term)
+        if len(found) >= max_items:
+            break
+    return found
+
+
+def _fallback_answer_from_sources(question: str, sources: list[dict[str, Any]], detail: str) -> str:
+    snippets = [
+        (s.get("snippet") or "").replace("\n", " ").strip()
+        for s in sources
+        if (s.get("snippet") or "").strip()
+    ]
+    if not snippets:
+        return f"LLM unavailable ({detail}). No retrieved content is available yet."
+
+    corpus = " ".join(snippets[:5])
+    if TECH_QUERY_RE.search(question):
+        terms = _extract_tech_terms(corpus)
+        if terms:
+            return (
+                f"LLM unavailable ({detail}). Based on retrieved content, the tech stack appears to include: "
+                f"{', '.join(terms)}."
+            )
+
+    preview_lines = []
+    for snippet in snippets[:3]:
+        cut = snippet[:220] + ("..." if len(snippet) > 220 else "")
+        preview_lines.append(f"- {cut}")
+    return f"LLM unavailable ({detail}). Retrieved context:\n" + "\n".join(preview_lines)
 
 
 async def chat_rag(user: User, message: str, kb_id: int | None = None, session_id: str | None = None) -> dict:
@@ -207,15 +281,7 @@ async def chat_rag(user: User, message: str, kb_id: int | None = None, session_i
             answer = await llm_generate(user_prompt, system=system)
         except Exception as e:
             detail = str(e).strip() or e.__class__.__name__
-            if sources:
-                excerpt = (sources[0].get("snippet") or "").strip().replace("\n", " ")
-                excerpt = excerpt[:400] + ("..." if len(excerpt) > 400 else "")
-                answer = f"LLM unavailable ({detail}). Using top retrieved source instead: {excerpt}"
-            else:
-                answer = (
-                    f"(LLM error: {detail}. Ensure Ollama is running with model "
-                    f"'{settings.ollama_model}' or set OPENAI_API_KEY.)"
-                )
+            answer = _fallback_answer_from_sources(message, sources, detail)
 
         db.add(ChatMessage(session_id=session_key, role=ChatRole.USER, content=message))
         db.add(ChatMessage(session_id=session_key, role=ChatRole.ASSISTANT, content=answer))
