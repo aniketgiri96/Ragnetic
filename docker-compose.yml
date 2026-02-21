@@ -1,24 +1,24 @@
 services:
   db:
     image: postgres:15-alpine
-    container_name: knowai-db
+    container_name: ragnetic-db
     environment:
-      POSTGRES_USER: knowai
-      POSTGRES_PASSWORD: knowaipassword
-      POSTGRES_DB: knowai
+      POSTGRES_USER: ragnetic
+      POSTGRES_PASSWORD: ragneticpassword
+      POSTGRES_DB: ragnetic
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U knowai"]
+      test: ["CMD-SHELL", "pg_isready -U ragnetic"]
       interval: 5s
       timeout: 5s
       retries: 5
 
   qdrant:
     image: qdrant/qdrant:latest
-    container_name: knowai-qdrant
+    container_name: ragnetic-qdrant
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -27,7 +27,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: knowai-redis
+    container_name: ragnetic-redis
     ports:
       - "6379:6379"
     volumes:
@@ -36,11 +36,11 @@ services:
   backend:
     build:
       context: ./backend
-    container_name: knowai-backend
+    container_name: ragnetic-backend
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://knowai:knowaipassword@db:5432/knowai
+      - DATABASE_URL=postgresql://ragnetic:ragneticpassword@db:5432/ragnetic
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333
       - CELERY_BROKER_URL=redis://redis:6379/0
@@ -64,25 +64,31 @@ services:
   celery_worker:
     build:
       context: ./backend
-    container_name: knowai-celery-worker
+    container_name: ragnetic-celery-worker
     environment:
-      - DATABASE_URL=postgresql://knowai:knowaipassword@db:5432/knowai
+      - DATABASE_URL=postgresql://ragnetic:ragneticpassword@db:5432/ragnetic
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - MINIO_URL=http://minio:9000
+      - MINIO_ACCESS_KEY=admin
+      - MINIO_SECRET_KEY=password
+      - MINIO_BUCKET=ragnetic
     depends_on:
       redis:
         condition: service_started
       db:
         condition: service_healthy
+      minio:
+        condition: service_started
     volumes:
       - ./backend:/app
     command: celery -A app.core.celery_app worker --loglevel=info
 
   celery_flower:
     image: mher/flower
-    container_name: knowai-celery-flower
+    container_name: ragnetic-celery-flower
     ports:
       - "5555:5555"
     environment:
@@ -94,7 +100,7 @@ services:
   frontend:
     build:
       context: ./frontend
-    container_name: knowai-frontend
+    container_name: ragnetic-frontend
     ports:
       - "3000:3000"
     environment:
@@ -108,7 +114,7 @@ services:
 
   minio:
     image: minio/minio
-    container_name: knowai-minio
+    container_name: ragnetic-minio
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -121,7 +127,7 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    container_name: knowai-ollama
+    container_name: ragnetic-ollama
     ports:
       - "11434:11434"
     volumes:

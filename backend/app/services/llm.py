@@ -16,12 +16,39 @@ async def _generate_ollama(prompt: str, system: str | None = None) -> str:
     if system:
         full_prompt = f"{system}\n\n{prompt}"
     url = f"{settings.ollama_url.rstrip('/')}/api/generate"
+    tags_url = f"{settings.ollama_url.rstrip('/')}/api/tags"
     payload = {
         "model": settings.ollama_model,
         "prompt": full_prompt,
         "stream": False,
     }
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    timeout = httpx.Timeout(
+        timeout=float(settings.llm_timeout_seconds),
+        connect=float(settings.llm_connect_timeout_seconds),
+    )
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        # Fast-fail if the configured model is not available locally.
+        try:
+            tags_resp = await client.get(tags_url)
+            if tags_resp.status_code == 200:
+                data = tags_resp.json()
+                models = data.get("models") or []
+                names = {
+                    (m.get("name") or "").split(":")[0]
+                    for m in models
+                    if isinstance(m, dict)
+                }
+                names_full = {m.get("name") for m in models if isinstance(m, dict)}
+                configured = settings.ollama_model
+                configured_base = configured.split(":")[0]
+                if configured not in names_full and configured_base not in names:
+                    raise RuntimeError(
+                        f"Ollama model '{configured}' not found. Pull it with: ollama run {configured}"
+                    )
+        except httpx.HTTPError:
+            # Continue to generation attempt; request may still succeed.
+            pass
+
         resp = await client.post(url, json=payload)
         resp.raise_for_status()
         data = resp.json()

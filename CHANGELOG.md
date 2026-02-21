@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to KnowAI are documented here. Versioning follows [Semantic Versioning](https://semver.org/).
+All notable changes to Ragnetic are documented here. Versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 

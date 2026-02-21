@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.ingestion.embedding import get_embedding_dim
 
 _client: QdrantClient | None = None
-COLLECTION_PREFIX = "knowai"
+COLLECTION_PREFIX = "ragnetic"
 DEFAULT_EMBEDDING_VERSION = "v1"
 
 
@@ -39,4 +39,16 @@ def upsert_chunks(collection: str, points: list[PointStruct]):
 
 
 def search_collection(collection: str, vector: list[float], limit: int = 5):
-    return get_qdrant().search(collection_name=collection, query_vector=vector, limit=limit)
+    client = get_qdrant()
+    # qdrant-client compatibility across versions:
+    # - older: client.search(...)
+    # - newer: client.query_points(...)
+    if hasattr(client, "search"):
+        return client.search(collection_name=collection, query_vector=vector, limit=limit)
+    response = client.query_points(
+        collection_name=collection,
+        query=vector,
+        limit=limit,
+        with_payload=True,
+    )
+    return getattr(response, "points", response)
