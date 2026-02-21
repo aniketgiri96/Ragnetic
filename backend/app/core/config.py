@@ -27,11 +27,22 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 30
     llm_connect_timeout_seconds: int = 5
     llm_model_check_timeout_seconds: int = 3
+    ollama_num_predict: int = 220
+    ollama_temperature: float = 0.1
     openai_api_key: Optional[str] = None
+
+    chunk_max_chars: int = 600
+    chunk_overlap_chars: int = 80
+    chunk_min_chars: int = 180
+
+    chat_context_max_sources: int = 4
+    chat_context_max_chars_per_source: int = 420
+
     retrieval_top_k: int = 5
-    retrieval_dense_limit: int = 30
-    retrieval_sparse_pool: int = 800
-    retrieval_rerank_top_n: int = 12
+    retrieval_dense_limit: int = 20
+    retrieval_sparse_pool: int = 240
+    retrieval_rerank_top_n: int = 8
+    retrieval_enable_cross_encoder: bool = False
     environment: str = "development"
 
     @property
