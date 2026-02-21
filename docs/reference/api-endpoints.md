@@ -9,6 +9,8 @@ Interactive OpenAPI docs: `/docs`
 ### `POST /auth/register`
 Create a new user account.
 
+Rate limit: 10 requests/minute per IP+email.
+
 Request body:
 
 ```json
@@ -28,6 +30,8 @@ Success response:
 
 ### `POST /auth/login`
 Log in and receive a bearer token.
+
+Rate limit: 20 requests/minute per IP+email.
 
 Request body:
 
@@ -132,6 +136,7 @@ Constraint: last owner cannot be removed.
 Upload a document and enqueue ingestion.
 
 Auth: `Authorization: Bearer <token>` required.
+Rate limit: 30 requests/minute per user+IP.
 
 Query params:
 - `kb_id` (optional): target knowledge base ID
@@ -176,6 +181,7 @@ Possible statuses: `pending`, `processing`, `indexed`, `failed`.
 Run semantic search over a knowledge base.
 
 Auth: `Authorization: Bearer <token>` required.
+Rate limit: 120 requests/minute per user+IP.
 
 Query params:
 - `query` (required)
@@ -204,6 +210,7 @@ Success response:
 Ask a question and receive an answer grounded in retrieved document chunks.
 
 Auth: `Authorization: Bearer <token>` required.
+Rate limit: 90 requests/minute per user+IP.
 
 Request body:
 
@@ -220,6 +227,7 @@ Success response:
 ```json
 {
   "answer": "...",
+  "session_id": "b4ce5b2fca0147ff8b952f5f703d1a1a",
   "sources": [
     {
       "snippet": "...",
@@ -231,6 +239,31 @@ Success response:
   ]
 }
 ```
+
+`session_id` is optional in request, but recommended. If omitted, server creates a new session ID and returns it.
+
+## Chat Sessions
+
+### `GET /chat/sessions`
+List chat sessions for the authenticated user.
+
+Auth: `Authorization: Bearer <token>` required.
+
+Query params:
+- `kb_id` (optional): filter sessions by knowledge base
+
+### `GET /chat/sessions/{session_id}`
+Get session metadata and messages.
+
+Auth: `Authorization: Bearer <token>` required.
+
+Query params:
+- `limit` (optional, default `100`, max `500`): number of latest messages returned
+
+### `DELETE /chat/sessions/{session_id}`
+Delete a chat session and its messages.
+
+Auth: `Authorization: Bearer <token>` required.
 
 ## Health
 

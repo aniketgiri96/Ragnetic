@@ -38,8 +38,9 @@ export default function LoginPage() {
         setDone("Registered. You can log in now.");
       } else {
         localStorage.setItem("ragnetic_token", data.access_token);
-        setDone("Logged in.");
-        setTimeout(() => router.push("/upload"), 500);
+        window.dispatchEvent(new Event("ragnetic-auth-changed"));
+        setDone("Logged in. Redirecting to dashboard...");
+        setTimeout(() => router.push("/dashboard"), 350);
       }
     } catch (err) {
       setError(err.message);

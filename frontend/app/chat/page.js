@@ -10,6 +10,7 @@ const btnPrimary = "fut-btn";
 export default function ChatPage() {
   const [kbs, setKbs] = useState([]);
   const [kbId, setKbId] = useState("");
+  const [sessionId, setSessionId] = useState("");
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -27,6 +28,22 @@ export default function ChatPage() {
       });
   }, []);
 
+  useEffect(() => {
+    if (!kbId || typeof window === "undefined") return;
+    const key = `ragnetic_chat_session_${kbId}`;
+    const existing = localStorage.getItem(key);
+    if (existing) {
+      setSessionId(existing);
+      return;
+    }
+    const generated =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem(key, generated);
+    setSessionId(generated);
+  }, [kbId]);
+
   const handleSend = async (e) => {
     e.preventDefault();
     if (!message.trim()) return;
@@ -39,7 +56,12 @@ export default function ChatPage() {
       const res = await chat({
         message: userMsg,
         kb_id: kbId ? parseInt(kbId, 10) : undefined,
+        session_id: sessionId || undefined,
       });
+      if (res.session_id && kbId && typeof window !== "undefined") {
+        localStorage.setItem(`ragnetic_chat_session_${kbId}`, res.session_id);
+        setSessionId(res.session_id);
+      }
       setMessages((prev) => [
         ...prev,
         { role: "assistant", content: res.answer, sources: res.sources || [] },
@@ -84,6 +106,25 @@ export default function ChatPage() {
               </option>
             ))}
           </select>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="fut-btn-ghost"
+              onClick={() => {
+                if (!kbId || typeof window === "undefined") return;
+                const generated =
+                  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                    ? crypto.randomUUID()
+                    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+                localStorage.setItem(`ragnetic_chat_session_${kbId}`, generated);
+                setSessionId(generated);
+                setMessages([]);
+              }}
+            >
+              New thread
+            </button>
+            {sessionId && <p className="text-xs text-slate-500">Session: {sessionId.slice(0, 12)}…</p>}
+          </div>
         </div>
 
         {error && (

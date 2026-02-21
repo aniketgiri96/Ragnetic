@@ -60,8 +60,11 @@ curl -H "Authorization: Bearer $TOKEN" "http://localhost:8000/search/?query=vaca
 curl -X POST http://localhost:8000/chat/ \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"message":"Summarize the vacation policy","kb_id":1}'
+  -d '{"message":"Summarize the vacation policy","kb_id":1,"session_id":"demo-session-1"}'
 ```
+
+Using `session_id` keeps multi-turn context for the same conversation.  
+If omitted, backend generates and returns a new `session_id`.
 
 ## UI path
 

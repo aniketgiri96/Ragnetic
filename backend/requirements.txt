@@ -36,3 +36,6 @@ python-docx>=1.0.0
 
 # Embeddings (optional; stub works without it)
 # sentence-transformers>=2.2.0
+
+# Tests
+pytest>=8.0.0

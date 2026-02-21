@@ -23,8 +23,9 @@ Ragnetic backend settings are read from environment variables (see `backend/app/
 | `JWT_SECRET` | `change-me-in-production` | JWT signing secret |
 | `JWT_ALGORITHM` | `HS256` | JWT algorithm |
 | `JWT_EXPIRE_HOURS` | `24` | Token lifetime |
+| `ENVIRONMENT` | `development` | Set to `production` to enforce secure JWT secret check at startup |
 
-For production, always set a strong unique `JWT_SECRET`.
+For production, always set a strong unique `JWT_SECRET`. Startup now fails in `production` when `JWT_SECRET` remains default.
 
 ## LLM settings
 

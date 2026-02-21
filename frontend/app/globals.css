@@ -156,6 +156,11 @@
     opacity: 1;
   }
 
+  .fut-nav-button {
+    border: 0;
+    background: transparent;
+  }
+
   .fut-title {
     @apply font-semibold tracking-tight text-slate-900;
   }
@@ -400,9 +405,94 @@
     align-items: center;
   }
 
+  .dash-layout {
+    display: grid;
+    grid-template-columns: minmax(14rem, 16rem) minmax(0, 1fr);
+    gap: 1rem;
+    align-items: start;
+  }
+
+  .dash-sidebar {
+    position: sticky;
+    top: 6rem;
+    padding: 1rem;
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 1rem;
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.56));
+    backdrop-filter: blur(12px);
+  }
+
+  .dash-sidebar-kicker {
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: rgba(14, 116, 144, 0.85);
+    font-weight: 600;
+  }
+
+  .dash-sidebar-title {
+    margin-top: 0.35rem;
+    font-size: 1.1rem;
+    color: #0f172a;
+    font-weight: 600;
+  }
+
+  .dash-sidebar-nav {
+    margin-top: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+
+  .dash-sidebar-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.25rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: 0.65rem;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(15, 23, 42, 0.82);
+    border: 1px solid transparent;
+    transition: all 160ms ease;
+  }
+
+  .dash-sidebar-link:hover {
+    border-color: rgba(125, 211, 252, 0.75);
+    background: rgba(255, 255, 255, 0.78);
+    color: #020617;
+  }
+
+  .dash-sidebar-link-active {
+    border-color: rgba(14, 165, 233, 0.5);
+    background: linear-gradient(120deg, rgba(224, 242, 254, 0.72), rgba(255, 255, 255, 0.9));
+    color: #0f172a;
+    font-weight: 600;
+  }
+
+  .dash-main {
+    min-width: 0;
+  }
+
   @media (max-width: 640px) {
     .el-omnibox {
       grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 920px) {
+    .dash-layout {
+      grid-template-columns: 1fr;
+    }
+
+    .dash-sidebar {
+      position: static;
+    }
+
+    .dash-sidebar-nav {
+      flex-direction: row;
+      flex-wrap: wrap;
     }
   }
 }
