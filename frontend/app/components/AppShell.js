@@ -36,6 +36,7 @@ function readToken() {
 export default function AppShell({ children }) {
   const router = useRouter();
   const pathname = usePathname() || "/";
+  const isChatRoute = pathname === "/chat";
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -72,9 +73,10 @@ export default function AppShell({ children }) {
   }, [isAuthenticated, mounted, pathname, router]);
 
   const showDashboardShell = useMemo(
-    () => mounted && isAuthenticated && DASHBOARD_ROUTES.has(pathname),
-    [isAuthenticated, mounted, pathname],
+    () => mounted && isAuthenticated && DASHBOARD_ROUTES.has(pathname) && !isChatRoute,
+    [isAuthenticated, isChatRoute, mounted, pathname],
   );
+  const showChatImmersive = mounted && isAuthenticated && isChatRoute;
   const shouldHideProtectedContent = DASHBOARD_ROUTES.has(pathname) && (!mounted || !isAuthenticated);
 
   const handleLogout = () => {
@@ -88,7 +90,9 @@ export default function AppShell({ children }) {
 
   const brandHref = isAuthenticated ? "/dashboard" : "/";
   const isLanding = pathname === "/";
-  const mainClass = showDashboardShell
+  const mainClass = showChatImmersive
+    ? "w-full flex-1 px-2 py-3 sm:px-4"
+    : showDashboardShell
     ? "mx-auto w-full max-w-[1240px] flex-1 px-4 py-5 sm:px-6"
     : isLanding
       ? "mx-auto w-full max-w-[1240px] flex-1 px-4 pb-12 pt-8 sm:px-6"
