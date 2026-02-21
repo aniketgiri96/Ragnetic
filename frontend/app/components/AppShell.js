@@ -8,13 +8,24 @@ const TOKEN_KEY = "ragnetic_token";
 
 const DASHBOARD_ROUTES = new Set(["/dashboard", "/upload", "/search", "/chat", "/members"]);
 
-const SIDEBAR_LINKS = [
-  { href: "/dashboard", label: "Overview" },
-  { href: "/upload", label: "Upload" },
-  { href: "/search", label: "Search" },
-  { href: "/chat", label: "Chat" },
-  { href: "/members", label: "Members" },
-  { href: `${API_URL}/docs`, label: "API Docs", external: true },
+const SIDEBAR_SECTIONS = [
+  {
+    title: "Core",
+    links: [
+      { href: "/dashboard", label: "Overview" },
+      { href: "/upload", label: "Upload" },
+      { href: "/search", label: "Search" },
+      { href: "/chat", label: "Chat" },
+    ],
+  },
+  {
+    title: "Team",
+    links: [{ href: "/members", label: "Members" }],
+  },
+  {
+    title: "Resources",
+    links: [{ href: `${API_URL}/docs`, label: "API Docs", external: true }],
+  },
 ];
 
 function readToken() {
@@ -51,7 +62,7 @@ export default function AppShell({ children }) {
       setIsAuthenticated(hasToken);
       return;
     }
-    if (!hasToken && (DASHBOARD_ROUTES.has(pathname) || pathname === "/")) {
+    if (!hasToken && DASHBOARD_ROUTES.has(pathname)) {
       router.replace("/login");
       return;
     }
@@ -75,36 +86,37 @@ export default function AppShell({ children }) {
     router.push("/login");
   };
 
-  const brandHref = isAuthenticated ? "/dashboard" : "/login";
+  const brandHref = isAuthenticated ? "/dashboard" : "/";
+  const isLanding = pathname === "/";
+  const mainClass = showDashboardShell
+    ? "mx-auto w-full max-w-[1240px] flex-1 px-4 py-5 sm:px-6"
+    : isLanding
+      ? "mx-auto w-full max-w-[1240px] flex-1 px-4 pb-12 pt-8 sm:px-6"
+      : "mx-auto w-full max-w-[760px] flex-1 px-4 py-10 sm:px-6";
+  const isDashboardHome = pathname === "/dashboard";
 
   return (
     <>
-      <header className="sticky top-0 z-50 bg-white/42 backdrop-blur-2xl">
-        <nav
-          className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 border-b border-slate-300/45 px-4 py-3 sm:px-6"
-          aria-label="Main navigation"
-        >
-          <a href={brandHref} className="fut-brand">
-            <span className="h-2 w-2 rounded-full bg-cyan-500 shadow-[0_0_10px_rgba(14,165,233,0.55)]" />
-            <span className="fut-script text-4xl leading-none text-slate-900">Ragnetic</span>
+      <header className="dash-topbar">
+        <nav className="dash-topbar-nav" aria-label="Main navigation">
+          <a href={brandHref} className="dash-brand">
+            <span className="dash-brand-logo">R</span>
+            <span className="dash-brand-stack">
+              <span className="dash-brand-text">Ragnetic</span>
+              <span className="dash-brand-subtext">Knowledge workspace</span>
+            </span>
           </a>
-          <div className="fut-nav-strip">
+          <div className="dash-topbar-actions">
             {!isAuthenticated ? (
-              <a
-                href="/login"
-                className={`fut-nav-link ${pathname === "/login" ? "fut-nav-link-active" : ""}`}
-              >
+              <a href="/login" className="dash-topbar-primary">
                 Login
               </a>
             ) : (
               <>
-                <a
-                  href="/dashboard"
-                  className={`fut-nav-link ${pathname === "/dashboard" ? "fut-nav-link-active" : ""}`}
-                >
+                <a href="/dashboard" className={`dash-topbar-link ${isDashboardHome ? "is-active" : ""}`}>
                   Dashboard
                 </a>
-                <button type="button" onClick={handleLogout} className="fut-nav-link fut-nav-button">
+                <button type="button" onClick={handleLogout} className="dash-topbar-ghost">
                   Logout
                 </button>
               </>
@@ -113,32 +125,42 @@ export default function AppShell({ children }) {
         </nav>
       </header>
 
-      <main className={showDashboardShell ? "mx-auto w-full max-w-7xl flex-1 px-4 py-8 sm:px-6" : "mx-auto w-full max-w-4xl flex-1 px-4 py-11 sm:px-6"}>
+      <main className={mainClass}>
         {shouldHideProtectedContent ? (
           <div className="fut-alert-info">Checking your session...</div>
         ) : showDashboardShell ? (
           <div className="dash-layout">
             <aside className="dash-sidebar" aria-label="Dashboard navigation">
-              <p className="dash-sidebar-kicker">Workspace</p>
-              <h2 className="dash-sidebar-title">Dashboard</h2>
-              <nav className="dash-sidebar-nav">
-                {SIDEBAR_LINKS.map((item) => {
-                  const isActive = !item.external && pathname === item.href;
-                  return (
-                    <a
-                      key={item.href}
-                      href={item.href}
-                      target={item.external ? "_blank" : undefined}
-                      rel={item.external ? "noopener noreferrer" : undefined}
-                      className={`dash-sidebar-link ${isActive ? "dash-sidebar-link-active" : ""}`}
-                    >
-                      {item.label}
-                    </a>
-                  );
-                })}
-              </nav>
+              <div className="dash-workspace-card">
+                <p className="dash-workspace-kicker">Workspace</p>
+                <h2 className="dash-workspace-title">Knowledge Ops</h2>
+                <p className="dash-workspace-copy">Clean flow for ingestion, retrieval, chat, and access control.</p>
+              </div>
+              {SIDEBAR_SECTIONS.map((section) => (
+                <div key={section.title} className="dash-sidebar-section">
+                  <p className="dash-sidebar-heading">{section.title}</p>
+                  <nav className="dash-sidebar-nav">
+                    {section.links.map((item) => {
+                      const isActive = !item.external && pathname === item.href;
+                      return (
+                        <a
+                          key={item.href}
+                          href={item.href}
+                          target={item.external ? "_blank" : undefined}
+                          rel={item.external ? "noopener noreferrer" : undefined}
+                          className={`dash-sidebar-link ${isActive ? "dash-sidebar-link-active" : ""}`}
+                        >
+                          {item.label}
+                        </a>
+                      );
+                    })}
+                  </nav>
+                </div>
+              ))}
             </aside>
-            <section className="dash-main">{children}</section>
+            <section className="dash-main">
+              <div className="dash-main-canvas">{children}</div>
+            </section>
           </div>
         ) : (
           children

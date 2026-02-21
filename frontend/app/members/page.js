@@ -111,19 +111,14 @@ export default function MembersPage() {
   };
 
   return (
-    <div className="space-y-8">
-      <section className="space-y-3">
-        <p className="fut-kicker">Collaborative Governance</p>
-        <h1 className="fut-title text-4xl sm:text-5xl flex items-end gap-3">
-          <span className="fut-script text-6xl sm:text-7xl text-slate-900">Members</span>
-          <span className="fut-title-gradient">Access Control</span>
-        </h1>
-        <p className="max-w-3xl text-slate-600">
-          Invite collaborators and manage role-based permissions at the knowledge-base level.
-        </p>
+    <div className="space-y-6">
+      <section className="page-head">
+        <p className="page-kicker">Access control</p>
+        <h1 className="page-title">Knowledge base members</h1>
+        <p className="page-subtitle">Invite collaborators and manage role permissions.</p>
       </section>
 
-      <div className="fut-panel max-w-5xl space-y-4 p-4 sm:p-5">
+      <div className="ui-card space-y-4">
         <div>
           <label htmlFor="members-kb" className={labelClass}>
             Knowledge base
@@ -149,7 +144,7 @@ export default function MembersPage() {
           </p>
         )}
 
-        <form onSubmit={handleAddMember} className="grid gap-3 sm:grid-cols-3">
+        <form onSubmit={handleAddMember} className="ui-grid-two">
           <div className="sm:col-span-2">
             <label htmlFor="member-email" className={labelClass}>
               User email
@@ -182,7 +177,7 @@ export default function MembersPage() {
               ))}
             </select>
           </div>
-          <div className="sm:col-span-3">
+          <div className="sm:col-span-2">
             <button type="submit" className={btnPrimary} disabled={!isOwner || submitting || !email.trim()}>
               {submitting ? "Saving..." : "Add or update member"}
             </button>
@@ -196,7 +191,7 @@ export default function MembersPage() {
           {error.startsWith("Please log in") && (
             <>
               {" "}
-              <a href="/login" className="font-medium underline text-cyan-700 hover:text-cyan-800">
+              <a href="/login" className="font-medium underline text-slate-900">
                 Log in
               </a>
             </>
@@ -205,22 +200,22 @@ export default function MembersPage() {
       )}
       {message && <div className="fut-alert-success">{message}</div>}
 
-      <div className="fut-panel max-w-5xl p-4 sm:p-5">
-        <h2 className="mb-4 text-lg font-semibold text-slate-900">Current members</h2>
+      <div className="ui-card">
+        <h2 className="ui-card-title">Current members</h2>
         {loadingMembers ? (
-          <p className="text-slate-600">Loading members...</p>
+          <p className="text-slate-600 mt-3">Loading members...</p>
         ) : members.length === 0 ? (
-          <p className="text-slate-600">No members found for this knowledge base.</p>
+          <p className="text-slate-600 mt-3">No members found for this knowledge base.</p>
         ) : (
-          <ul className="space-y-3">
+          <ul className="member-list">
             {members.map((m) => (
-              <li key={`${m.user_id}-${m.email}`} className="fut-card">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <li key={`${m.user_id}-${m.email}`} className="member-row">
+                <div className="flex flex-col gap-1">
                   <div>
                     <p className="font-medium text-slate-900">{m.email}</p>
-                    <p className="text-sm text-slate-600">User ID: {m.user_id}</p>
+                    <p className="text-xs text-slate-500">User ID: {m.user_id}</p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                  <div className="flex flex-wrap items-center gap-2">
                     <select
                       value={m.role}
                       onChange={(e) =>
@@ -230,7 +225,7 @@ export default function MembersPage() {
                           ),
                         )
                       }
-                      className="fut-input min-h-[2.62rem] px-4 py-1.5"
+                      className="fut-input min-h-[2.5rem] px-3 py-1.5 sm:min-w-[140px]"
                       disabled={!isOwner || savingUserId === m.user_id}
                     >
                       {ROLE_OPTIONS.map((role) => (
@@ -249,7 +244,7 @@ export default function MembersPage() {
                     </button>
                     <button
                       type="button"
-                      className="fut-btn-danger"
+                      className="fut-btn-danger sm:min-w-[84px]"
                       disabled={!isOwner || savingUserId === m.user_id}
                       onClick={() => handleRemove(m.user_id)}
                     >

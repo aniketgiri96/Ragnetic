@@ -48,82 +48,68 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="space-y-8 max-w-2xl mx-auto">
-      <section className="space-y-3">
-        <p className="fut-kicker">Identity Verification</p>
-        <h1 className="fut-title text-4xl sm:text-5xl flex items-end gap-3">
-          <span className="fut-script text-6xl sm:text-7xl text-slate-900">
-            {isRegister ? "Register" : "Login"}
-          </span>
-          <span className="fut-title-gradient">Access Node</span>
-        </h1>
-        <p className="text-slate-600">
-          Authenticate locally against your self-hosted Ragnetic backend.
-        </p>
+    <div className="space-y-6">
+      <section className="page-head">
+        <p className="page-kicker">Authentication</p>
+        <h1 className="page-title">{isRegister ? "Create account" : "Login to dashboard"}</h1>
+        <p className="page-subtitle">Authenticate against your self-hosted Ragnetic backend.</p>
       </section>
 
-      <div className="fut-panel">
-        <form onSubmit={handleSubmit} className="space-y-4 p-4 sm:p-5">
-          <div>
-            <label htmlFor="login-email" className={labelClass}>
-              Email
-            </label>
-            <input
-              id="login-email"
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className={inputClass}
-              autoComplete="email"
-            />
+      <div className="ui-card">
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="ui-grid-two">
+            <div>
+              <label htmlFor="login-email" className={labelClass}>
+                Email
+              </label>
+              <input
+                id="login-email"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className={inputClass}
+                autoComplete="email"
+              />
+            </div>
+            <div>
+              <label htmlFor="login-password" className={labelClass}>
+                Password
+              </label>
+              <input
+                id="login-password"
+                type="password"
+                placeholder="********"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className={inputClass}
+                autoComplete={isRegister ? "new-password" : "current-password"}
+              />
+            </div>
           </div>
-          <div>
-            <label htmlFor="login-password" className={labelClass}>
-              Password
-            </label>
-            <input
-              id="login-password"
-              type="password"
-              placeholder="••••••••"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className={inputClass}
-              autoComplete={isRegister ? "new-password" : "current-password"}
-            />
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="submit" className={btnPrimary}>
+              {isRegister ? "Register" : "Login"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsRegister(!isRegister);
+                setError("");
+                setDone("");
+              }}
+              className={btnSecondary}
+            >
+              {isRegister ? "Switch to login" : "Create account instead"}
+            </button>
           </div>
-          <button type="submit" className={btnPrimary}>
-            {isRegister ? "Register" : "Login"}
-          </button>
         </form>
-
-        <div className="mt-4 border-t border-slate-300/45 pt-4 px-4 sm:px-5">
-          <button
-            type="button"
-            onClick={() => {
-              setIsRegister(!isRegister);
-              setError("");
-              setDone("");
-            }}
-            className={`${btnSecondary} w-full sm:w-auto`}
-          >
-            {isRegister ? "Already have an account? Log in" : "Need an account? Register"}
-          </button>
-        </div>
       </div>
 
-      {error && (
-        <div className="fut-alert-error">
-          {error}
-        </div>
-      )}
-      {done && (
-        <div className="fut-alert-success">
-          {done}
-        </div>
-      )}
+      {error && <div className="fut-alert-error">{error}</div>}
+      {done && <div className="fut-alert-success">{done}</div>}
     </div>
   );
 }
