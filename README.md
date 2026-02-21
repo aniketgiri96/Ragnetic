@@ -29,13 +29,22 @@ KnowAI is a self-hosted, enterprise-ready Retrieval-Augmented Generation (RAG) p
    ```bash
    docker-compose up -d
    ```
-3. Access the KnowAI Dashboard:
+3. (Optional) Pull an Ollama model for RAG Chat. After the stack is up, run:
+   ```bash
+   docker exec -it knowai-ollama ollama run llama3.2
+   ```
+   Exit the model prompt with `/bye`. Chat will use this model; you can change `OLLAMA_MODEL` in `docker-compose.yml` and pull a different model (e.g. `ollama run mistral`).
+4. Access the KnowAI Dashboard:
    Navigate to [http://localhost:3000](http://localhost:3000)
 
-4. Access the Backend API Docs:
+5. Access the Backend API Docs:
    Navigate to [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ## Architecture
+
+High-level view of what you're building:
+
+![KnowAI architecture](assets/knowai-architecture-diagram.png)
 
 KnowAI uses a modern, scalable stack:
 - **Frontend**: Next.js 14, TailwindCSS, Shadcn UI
@@ -50,6 +59,14 @@ KnowAI uses a modern, scalable stack:
 
 We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on how to get started, our development workflow, and coding standards.
 
+## Documentation
+
+- [Vision and goals](docs/vision-and-goals.md)
+- [Product overview](docs/product-overview.md) · [Personas](docs/personas.md)
+- [Market and competitors](docs/market-and-competitors.md)
+- [Architecture](docs/architecture/tech-stack.md) · [Data flows](docs/architecture/data-flows.md)
+- [Reference: hardware and models](docs/reference/hardware-and-models.md)
+
 ## License
 
-This project is licensed under the Apache 2.0 License. See the `LICENSE` file for details.
+This project is licensed under the Apache 2.0 License. See the [LICENSE](LICENSE) file for details.

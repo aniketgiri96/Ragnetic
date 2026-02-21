@@ -1,1 +1,14 @@
-# Dockerfile for KnowAI FastAPI Application\n\n# Use the official Python image from the Docker Hub\nFROM python:3.9-slim\n\n# Set the working directory\nWORKDIR /app\n\n# Copy the requirements.txt file into the container\nCOPY requirements.txt .\n\n# Install the dependencies\nRUN pip install --no-cache-dir -r requirements.txt\n\n# Copy the application code into the container\nCOPY . .\n\n# Expose the required port\nEXPOSE 8000\n\n# Set environment variables\nENV PYTHONUNBUFFERED 1\n\n# Command to run the application\nCMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# KnowAI FastAPI Backend
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 8000
+ENV PYTHONUNBUFFERED=1
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0", "--port", "8000"]

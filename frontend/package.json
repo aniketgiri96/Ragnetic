@@ -1,1 +1,19 @@
-{\n  "name": "knowai-front-end",\n  "version": "1.0.0",\n  "private": true,\n  "dependencies": {\n    "next": "latest",\n    "react": "latest",\n    "react-dom": "latest"\n  },\n  "scripts": {\n    "dev": "next dev",\n    "build": "next build",\n    "start": "next start"\n  }\n}
+{
+  "name": "knowai-front-end",
+  "version": "1.1.0",
+  "private": true,
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.2.0",
+    "autoprefixer": "^10.4.24",
+    "next": "latest",
+    "postcss": "^8.5.6",
+    "react": "latest",
+    "react-dom": "latest",
+    "tailwindcss": "^4.2.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  }
+}
