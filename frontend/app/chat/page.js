@@ -79,34 +79,33 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="space-y-8">
-      <section className="space-y-3">
-        <p className="fut-kicker">Grounded Conversation</p>
-        <h1 className="fut-title text-4xl sm:text-5xl flex items-end gap-3">
-          <span className="fut-script text-6xl sm:text-7xl text-slate-900">Chat</span>
-          <span className="fut-title-gradient">Conversation Rail</span>
-        </h1>
-        <p className="text-slate-600 max-w-3xl">
-          Adapted to an ElevenLabs-style conversational flow: minimal transcript rail, no boxed bubbles, and a compact omnibox composer.
-        </p>
+    <div className="space-y-6">
+      <section className="page-head">
+        <p className="page-kicker">Assistant</p>
+        <h1 className="page-title">Grounded chat</h1>
+        <p className="page-subtitle">Ask questions against your selected knowledge base and review source snippets.</p>
       </section>
 
-      <div className="el-rail max-w-5xl">
-        <div className="el-rail-top">
-          <p className="text-xs uppercase tracking-[0.22em] text-cyan-700/80">Knowledge base</p>
-          <select
-            id="chat-kb"
-            value={kbId}
-            onChange={(e) => setKbId(e.target.value)}
-            className={`${inputClass} mt-2`}
-          >
-            {kbs.map((kb) => (
-              <option key={kb.id} value={kb.id}>
-                {kb.name}{kb.role ? ` (${kb.role})` : ""}
-              </option>
-            ))}
-          </select>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+      <div className="ui-card space-y-4">
+        <div className="ui-grid-two">
+          <div>
+            <label htmlFor="chat-kb" className={labelClass}>
+              Knowledge base
+            </label>
+            <select
+              id="chat-kb"
+              value={kbId}
+              onChange={(e) => setKbId(e.target.value)}
+              className={inputClass}
+            >
+              {kbs.map((kb) => (
+                <option key={kb.id} value={kb.id}>
+                  {kb.name}{kb.role ? ` (${kb.role})` : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-end justify-start sm:justify-end gap-2">
             <button
               type="button"
               className="fut-btn-ghost"
@@ -123,7 +122,7 @@ export default function ChatPage() {
             >
               New thread
             </button>
-            {sessionId && <p className="text-xs text-slate-500">Session: {sessionId.slice(0, 12)}…</p>}
+            {sessionId && <p className="text-xs text-slate-500">Session: {sessionId.slice(0, 12)}...</p>}
           </div>
         </div>
 
@@ -133,7 +132,7 @@ export default function ChatPage() {
             {error.startsWith("Please log in") && (
               <>
                 {" "}
-                <a href="/login" className="font-medium underline text-cyan-700 hover:text-cyan-800">
+                <a href="/login" className="font-medium underline text-slate-900">
                   Log in
                 </a>
               </>
@@ -141,43 +140,40 @@ export default function ChatPage() {
           </div>
         )}
 
-        {messages.length === 0 ? (
-          <div className="fut-alert-info">
-            No conversation yet. Ask something to your selected knowledge base.
-          </div>
-        ) : (
-          <ol className="el-log">
-            {messages.map((m, i) => (
-              <li key={i} className={`el-log-item ${m.role === "user" ? "is-user" : "is-assistant"}`}>
-                <div className="el-log-node" />
-                <div className="el-log-body">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs uppercase tracking-[0.2em] text-cyan-700/80">
-                      {m.role === "user" ? "Operator" : "Assistant"}
-                    </p>
-                    <span className="text-[11px] text-slate-500">#{String(i + 1).padStart(2, "0")}</span>
+        <div className="chat-thread">
+          {messages.length === 0 ? (
+            <div className="fut-alert-info">
+              No conversation yet. Ask a question to begin.
+            </div>
+          ) : (
+            <ol className="chat-message-list">
+              {messages.map((m, i) => (
+                <li key={i} className={`chat-message-item ${m.role === "user" ? "is-user" : "is-assistant"}`}>
+                  <div className="chat-message-head">
+                    <p>{m.role === "user" ? "You" : "Assistant"}</p>
+                    <span>#{String(i + 1).padStart(2, "0")}</span>
                   </div>
-                  <p className="mt-1.5 text-slate-900 whitespace-pre-wrap">{m.content}</p>
+                  <p className="chat-message-body">{m.content}</p>
                   {m.sources?.length > 0 && (
-                    <div className="mt-2 pl-3 border-l border-cyan-300/35">
-                      <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-700/80">Grounding</p>
-                      <ul className="mt-1.5 space-y-1.5">
+                    <div className="chat-source-box">
+                      <p className="chat-source-title">Sources</p>
+                      <ul>
                         {m.sources.map((s, j) => (
-                          <li key={j} className="text-sm text-slate-700">
+                          <li key={j}>
                             {s.snippet?.slice(0, 180)}
-                            {(s.snippet?.length ?? 0) > 180 && "…"}
+                            {(s.snippet?.length ?? 0) > 180 && "..."}
                           </li>
                         ))}
                       </ul>
                     </div>
                   )}
-                </div>
-              </li>
-            ))}
-          </ol>
-        )}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
 
-        <form onSubmit={handleSend} className="el-omnibox">
+        <form onSubmit={handleSend} className="chat-composer">
           <label htmlFor="chat-message" className={`${labelClass} sr-only`}>
             Message
           </label>
@@ -192,7 +188,7 @@ export default function ChatPage() {
             aria-label="Message"
           />
           <button type="submit" disabled={loading} className={btnPrimary}>
-            {loading ? "Sending…" : "Send"}
+            {loading ? "Sending..." : "Send"}
           </button>
         </form>
       </div>
