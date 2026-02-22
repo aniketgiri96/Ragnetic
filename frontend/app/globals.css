@@ -436,6 +436,160 @@
     font-weight: 600;
   }
 
+  .upload-replace-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: #334155;
+    font-size: 0.84rem;
+    font-weight: 600;
+  }
+
+  .upload-replace-toggle input {
+    width: 1rem;
+    height: 1rem;
+    accent-color: #2563eb;
+  }
+
+  .upload-docs-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.85rem;
+  }
+
+  .upload-docs-table-wrap {
+    overflow: visible;
+    border: 1px solid #dbe4ef;
+    border-radius: 0.85rem;
+    background: #ffffff;
+  }
+
+  .upload-docs-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 0.86rem;
+    color: #334155;
+  }
+
+  .upload-docs-table th,
+  .upload-docs-table td {
+    padding: 0.65rem 0.7rem;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: left;
+    vertical-align: top;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .upload-docs-table th {
+    background: #f8fafc;
+    color: #475569;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 700;
+  }
+
+  .upload-docs-table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  .upload-docs-actions {
+    text-align: right;
+    width: 5.5rem;
+    white-space: nowrap;
+  }
+
+  .upload-docs-col-filename {
+    width: 34%;
+  }
+
+  .upload-docs-col-status {
+    width: 30%;
+  }
+
+  .upload-docs-col-created {
+    width: 26%;
+  }
+
+  .upload-docs-menu-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .upload-docs-menu-btn {
+    width: 2rem;
+    height: 2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.55rem;
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #334155;
+    cursor: pointer;
+  }
+
+  .upload-docs-menu-btn:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+  }
+
+  .upload-docs-menu-icon {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.14rem;
+  }
+
+  .upload-docs-menu-icon span {
+    width: 0.2rem;
+    height: 0.2rem;
+    border-radius: 999px;
+    background: currentColor;
+  }
+
+  .upload-docs-menu {
+    position: absolute;
+    top: calc(100% + 0.24rem);
+    right: 0;
+    z-index: 20;
+    min-width: 8.5rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.7rem;
+    background: #ffffff;
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+    overflow: hidden;
+  }
+
+  .upload-docs-menu-item {
+    width: 100%;
+    border: 0;
+    background: #ffffff;
+    color: #334155;
+    text-align: left;
+    padding: 0.52rem 0.65rem;
+    font-size: 0.84rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .upload-docs-menu-item:hover {
+    background: #f8fafc;
+  }
+
+  .upload-docs-menu-item.is-danger {
+    color: #b91c1c;
+  }
+
+  .upload-docs-menu-item.is-danger:hover {
+    background: #fff1f2;
+  }
+
   .ui-result-list {
     border: 1px solid #dbe4ef;
     border-radius: 1rem;

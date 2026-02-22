@@ -26,6 +26,22 @@ Inspect worker logs:
 docker logs ragnetic-celery-worker --tail 200
 ```
 
+## Upload creates duplicates or should replace existing file
+
+Use `replace_existing=true` on `POST /upload/` (default behavior). This reuses the same document record and re-indexes it.
+
+If replacement is blocked, check:
+
+- Existing document may still be in `processing` state.
+- Worker may be unavailable, so re-index never starts.
+
+Verification:
+
+```bash
+curl -sS -H "Authorization: Bearer <token>" "http://localhost:8000/documents?kb_id=1"
+docker compose logs celery_worker --tail 200
+```
+
 ## Chat returns LLM error
 
 Common message: `Ensure Ollama is running or set OPENAI_API_KEY`.

@@ -65,3 +65,15 @@ def get_stream(object_key: str) -> BinaryIO:
     """Get a readable stream for the object."""
     data = download_file(object_key)
     return io.BytesIO(data)
+
+
+def delete_file(object_key: str) -> None:
+    """Delete file from object store; ignore missing objects."""
+    c = _get_client()
+    if c is None:
+        return
+    try:
+        c.remove_object(settings.minio_bucket, object_key)
+    except Exception:
+        # Best-effort cleanup; callers may continue if object is already gone.
+        pass

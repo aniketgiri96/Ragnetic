@@ -9,7 +9,7 @@ from app.models.base import SessionLocal, Base
 from app.models.document import Document, DocumentStatus
 from app.models.user import User  # noqa: F401 - ensure mapper registration for relationships
 from app.core.config import settings
-from app.services.qdrant_client import ensure_collection, upsert_chunks, collection_name
+from app.services.qdrant_client import delete_document_chunks, ensure_collection, upsert_chunks
 from app.services.storage import get_stream
 from qdrant_client.models import PointStruct
 
@@ -72,6 +72,8 @@ def ingest_document(self, document_id: int) -> dict:
     kb_id = doc_ref.knowledge_base_id if doc_ref else 1
     db2.close()
     coll = ensure_collection(kb_id)
+    # Ensure re-indexing a document does not leave stale chunks behind.
+    delete_document_chunks(kb_id=kb_id, doc_id=document_id)
     points = [
         PointStruct(
             id=str(uuid.uuid4()),

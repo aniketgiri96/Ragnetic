@@ -28,6 +28,10 @@ class UpdateMemberRoleRequest(BaseModel):
     role: str
 
 
+class RenameDocumentRequest(BaseModel):
+    filename: str
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     validate_security_settings()
@@ -63,11 +67,12 @@ async def upload_document(
     request: Request,
     file: UploadFile = File(...),
     kb_id: int = Query(None),
+    replace_existing: bool = Query(True),
     user=Depends(deps.get_current_user),
 ):
     ip = request.client.host if request and request.client else "unknown"
     enforce_rate_limit("upload", key=f"user:{user.id}:ip:{ip}")
-    return await routes.upload_document(user=user, file=file, kb_id=kb_id)
+    return await routes.upload_document(user=user, file=file, kb_id=kb_id, replace_existing=replace_existing)
 
 
 @app.get("/search/")
@@ -126,6 +131,21 @@ def document_status(document_id: int, user=Depends(deps.get_current_user)):
     if out is None:
         raise HTTPException(status_code=404, detail="Document not found")
     return out
+
+
+@app.get("/documents", response_model=list)
+def list_documents(kb_id: Optional[int] = Query(None), user=Depends(deps.get_current_user)):
+    return routes.list_documents(user=user, kb_id=kb_id)
+
+
+@app.patch("/documents/{document_id}", response_model=dict)
+def rename_document(document_id: int, body: RenameDocumentRequest, user=Depends(deps.get_current_user)):
+    return routes.rename_document(user=user, document_id=document_id, filename=body.filename)
+
+
+@app.delete("/documents/{document_id}", response_model=dict)
+def delete_document(document_id: int, user=Depends(deps.get_current_user)):
+    return routes.delete_document(user=user, document_id=document_id)
 
 
 @app.get("/kb/{kb_id}/members", response_model=list)
