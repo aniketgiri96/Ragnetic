@@ -8,12 +8,15 @@ class ApiError extends Error {
   }
 }
 
+function getToken() {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem("ragnetic_token") || "";
+}
+
 function getHeaders() {
   const headers = { "Content-Type": "application/json" };
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("ragnetic_token");
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-  }
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
   return headers;
 }
 
@@ -69,10 +72,67 @@ export async function chat(body) {
       message: body.message,
       kb_id: body.kb_id ?? undefined,
       session_id: body.session_id ?? undefined,
+      async_mode: body.async_mode ?? undefined,
     }),
   });
   await throwForError(res);
   return res.json();
+}
+
+export async function chatStream(body, { onEvent } = {}) {
+  const res = await fetch(`${API}/chat/stream`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({
+      message: body.message,
+      kb_id: body.kb_id ?? undefined,
+      session_id: body.session_id ?? undefined,
+    }),
+  });
+  await throwForError(res);
+  if (!res.body) throw new ApiError("Streaming response body is unavailable.", 500);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let finalPayload = null;
+
+  const emit = (event, payload) => {
+    if (event === "done") finalPayload = payload;
+    if (typeof onEvent === "function") onEvent({ event, payload });
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    let boundary = buffer.indexOf("\n\n");
+    while (boundary !== -1) {
+      const rawEvent = buffer.slice(0, boundary);
+      buffer = buffer.slice(boundary + 2);
+      boundary = buffer.indexOf("\n\n");
+      if (!rawEvent.trim()) continue;
+
+      let eventName = "message";
+      const dataLines = [];
+      rawEvent.split("\n").forEach((line) => {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+      });
+      if (!dataLines.length) continue;
+
+      const payloadText = dataLines.join("\n");
+      let payload = payloadText;
+      try {
+        payload = JSON.parse(payloadText);
+      } catch {
+        // Keep plain text payload.
+      }
+      emit(eventName, payload);
+    }
+  }
+  return finalPayload;
 }
 
 export async function documentStatus(id) {
@@ -139,6 +199,12 @@ export async function deleteChatSession(sessionId) {
     method: "DELETE",
     headers: getHeaders(),
   });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function getChatJob(jobId) {
+  const res = await fetch(`${API}/chat/jobs/${encodeURIComponent(jobId)}`, { headers: getHeaders() });
   await throwForError(res);
   return res.json();
 }

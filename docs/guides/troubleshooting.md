@@ -30,15 +30,64 @@ docker logs ragnetic-celery-worker --tail 200
 
 Common message: `Ensure Ollama is running or set OPENAI_API_KEY`.
 
-Fix:
-- Confirm Ollama container is running.
-- Pull a local model once:
+Fix checklist:
+1. Confirm Ollama container is running:
 
 ```bash
-docker exec -it ragnetic-ollama ollama run llama3.2
+docker compose ps ollama
 ```
 
-- Or configure `OPENAI_API_KEY` for cloud fallback.
+2. Verify Ollama is reachable from host and backend:
+
+```bash
+curl -sS http://localhost:11434/api/tags
+docker compose exec -T backend curl -sS http://ollama:11434/api/tags
+```
+
+3. Pull a local model once if missing:
+
+```bash
+docker exec -it ragnetic-ollama ollama pull llama3.2
+```
+
+4. Validate generation latency directly against Ollama:
+
+```bash
+time curl -sS http://localhost:11434/api/generate -d '{"model":"llama3.2","prompt":"Say hi in one sentence.","stream":false}'
+```
+
+5. Validate backend model config:
+
+```bash
+docker compose exec -T backend env | grep -E 'OLLAMA_URL|OLLAMA_MODEL|OPENAI_API_KEY'
+```
+
+6. If config changed, restart backend + worker:
+
+```bash
+docker compose restart backend celery_worker
+```
+
+7. If local Ollama is still unavailable, configure `OPENAI_API_KEY` for cloud fallback.
+
+## Long generations exceed sync request time
+
+If answer generation is long, treat it as an architecture routing concern, not just a timeout tweak.
+
+Use these request lanes:
+
+- Interactive lane: `POST /chat/stream` for token streaming (SSE).
+- Background lane: `POST /chat/` with `"async_mode": true` and poll `GET /chat/jobs/{job_id}`.
+- Short lane: `POST /chat/` for normal fast responses.
+
+Operational checks for async lane:
+
+```bash
+docker compose ps celery_worker
+docker compose logs celery_worker --tail 200
+```
+
+The worker log should include `app.tasks.chat.process_chat_job`.
 
 ## Search returns empty results
 

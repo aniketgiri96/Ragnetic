@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { chat, deleteChatSession, getChatSession, listChatSessions, listKb } from "../../lib/api.js";
+import { chat, chatStream, deleteChatSession, getChatJob, getChatSession, listChatSessions, listKb } from "../../lib/api.js";
 
 const inputClass = "fut-input";
 const labelClass = "fut-label";
 const SESSION_KEY_PREFIX = "ragnetic_chat_session_";
 const SESSION_TITLE_KEY = "ragnetic_chat_titles_v1";
 const DELETE_UNDO_WINDOW_MS = 5000;
+const ASYNC_HINT_RE = /\b(long|detailed|in-depth|comprehensive|elaborate|step[- ]by[- ]step|thorough|bullet)\b/i;
 
 function generateSessionId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -44,6 +45,41 @@ function formatRelativeTime(dateIso) {
   if (deltaHours < 24) return `${deltaHours}h ago`;
   const deltaDays = Math.round(deltaHours / 24);
   return `${deltaDays}d ago`;
+}
+
+function shouldUseAsyncMode(text) {
+  const normalized = (text || "").trim();
+  if (!normalized) return false;
+  if (normalized.length >= 260) return true;
+  return ASYNC_HINT_RE.test(normalized);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatElapsedMs(ms) {
+  const safe = Number.isFinite(ms) ? Math.max(0, Math.floor(ms)) : 0;
+  if (safe < 1000) return `${safe}ms`;
+  const seconds = (safe / 1000).toFixed(1);
+  return `${seconds}s`;
+}
+
+function reasoningStepLabel(step) {
+  const map = {
+    understand: "Understand question",
+    retrieve: "Retrieve context",
+    evidence: "Select evidence",
+    draft: "Draft answer",
+    evolve: "Evolve response",
+    fallback: "Fallback mode",
+    no_context: "No context found",
+    finalize: "Finalize response",
+    queued: "Queued job",
+    running: "Background generation",
+    completed: "Job completed",
+  };
+  return map[step] || "Progress update";
 }
 
 function sortSessionsByUpdatedDesc(sessions) {
@@ -104,6 +140,8 @@ export default function ChatPage() {
             content: row.content,
             created_at: row.created_at,
             sources: Array.isArray(row.sources) ? row.sources : [],
+            trace: [],
+            status_text: "",
           })),
         );
         setActiveSessionId(sessionId);
@@ -206,6 +244,8 @@ export default function ChatPage() {
                 content: row.content,
                 created_at: row.created_at,
                 sources: Array.isArray(row.sources) ? row.sources : [],
+                trace: [],
+                status_text: "",
               })),
             );
           } catch (err) {
@@ -322,6 +362,8 @@ export default function ChatPage() {
     if (!message.trim() || loading || sessionLoading) return;
     const userMsg = message.trim();
     const targetSessionId = activeSessionId || startNewThread();
+    const assistantId = `assistant-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const useAsyncMode = shouldUseAsyncMode(userMsg);
 
     setSessionTitles((prev) => {
       if (prev[targetSessionId]) return prev;
@@ -330,29 +372,191 @@ export default function ChatPage() {
     setMessage("");
     setMessages((prev) => [
       ...prev,
-      { role: "user", content: userMsg, created_at: new Date().toISOString(), sources: [] },
+      { role: "user", content: userMsg, created_at: new Date().toISOString(), sources: [], trace: [], status_text: "" },
+      {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        created_at: new Date().toISOString(),
+        sources: [],
+        trace: [],
+        status_text: "",
+      },
     ]);
     setLoading(true);
     setError("");
-    try {
-      const res = await chat({
-        message: userMsg,
-        kb_id: kbId ? parseInt(kbId, 10) : undefined,
-        session_id: targetSessionId || undefined,
+
+    const patchAssistant = (patch) => {
+      setMessages((prev) =>
+        prev.map((msg) => {
+          if (msg.id !== assistantId) return msg;
+          if (typeof patch === "function") return patch(msg);
+          return { ...msg, ...patch };
+        }),
+      );
+    };
+
+    const appendTrace = (step, detail) => {
+      patchAssistant((msg) => {
+        const current = Array.isArray(msg.trace) ? msg.trace : [];
+        if (current.some((item) => item.step === step && item.detail === detail)) {
+          return msg;
+        }
+        return {
+          ...msg,
+          trace: [...current, { step, detail, at: new Date().toISOString() }],
+        };
       });
-      if (res.session_id) {
-        setActiveSessionId(res.session_id);
-        persistActiveSession(res.session_id);
+    };
+
+    try {
+      if (useAsyncMode) {
+        patchAssistant({ content: "Queued long response...", sources: [], status_text: "Queued in background..." });
+        appendTrace("queued", "Added to background worker queue.");
+        const res = await chat({
+          message: userMsg,
+          kb_id: kbId ? parseInt(kbId, 10) : undefined,
+          session_id: targetSessionId || undefined,
+          async_mode: true,
+        });
+        if (res.session_id) {
+          setActiveSessionId(res.session_id);
+          persistActiveSession(res.session_id);
+        }
+
+        if (res.mode === "async" && res.job_id) {
+          const startedAt = Date.now();
+          let lastStatus = "";
+          while (true) {
+            const job = await getChatJob(res.job_id);
+            if (job.session_id) {
+              setActiveSessionId(job.session_id);
+              persistActiveSession(job.session_id);
+            }
+            if (job.status && job.status !== lastStatus) {
+              lastStatus = job.status;
+              if (job.status === "queued") appendTrace("queued", "Waiting for worker slot.");
+              else if (job.status === "running") appendTrace("running", "Generating answer in worker.");
+              else if (job.status === "completed") appendTrace("completed", "Background generation completed.");
+              else if (job.status === "failed") appendTrace("fallback", "Background generation failed.");
+            }
+            if (job.status === "completed") {
+              patchAssistant({
+                content: job.answer || "(No answer generated)",
+                sources: Array.isArray(job.sources) ? job.sources : [],
+                created_at: new Date().toISOString(),
+                status_text: "",
+              });
+              break;
+            }
+            if (job.status === "failed") {
+              throw new Error(job.error_message || "Async chat job failed.");
+            }
+
+            patchAssistant({
+              content: job.status === "running" ? "Generating long response..." : "Queued long response...",
+              status_text:
+                job.status === "running"
+                  ? `Background generation... ${formatElapsedMs(Date.now() - startedAt)}`
+                  : `Queued... ${formatElapsedMs(Date.now() - startedAt)}`,
+            });
+            if (Date.now() - startedAt > 180000) {
+              throw new Error("Async job is taking too long. Please check chat history and retry.");
+            }
+            await sleep(1500);
+          }
+        } else {
+          patchAssistant({
+            content: res.answer || "(No answer generated)",
+            sources: Array.isArray(res.sources) ? res.sources : [],
+            created_at: new Date().toISOString(),
+            status_text: "",
+          });
+        }
+      } else {
+        patchAssistant({ content: "Thinking...", sources: [], status_text: "Starting..." });
+        await chatStream(
+          {
+            message: userMsg,
+            kb_id: kbId ? parseInt(kbId, 10) : undefined,
+            session_id: targetSessionId || undefined,
+          },
+          {
+            onEvent: ({ event, payload }) => {
+              if (event === "meta") {
+                if (payload?.session_id) {
+                  setActiveSessionId(payload.session_id);
+                  persistActiveSession(payload.session_id);
+                }
+                patchAssistant({ content: "", sources: [], status_text: "Preparing answer..." });
+                return;
+              }
+              if (event === "reasoning") {
+                const step = typeof payload?.step === "string" ? payload.step : "progress";
+                const detail = typeof payload?.detail === "string" ? payload.detail : "Working...";
+                appendTrace(step, detail);
+                patchAssistant({ status_text: `${reasoningStepLabel(step)}...` });
+                return;
+              }
+              if (event === "sources_preview") {
+                const sourceNames = Array.isArray(payload?.sources)
+                  ? payload.sources
+                      .map((s) => (typeof s?.name === "string" ? s.name : ""))
+                      .filter(Boolean)
+                      .slice(0, 3)
+                  : [];
+                if (sourceNames.length > 0) {
+                  appendTrace("evidence", `Top sources: ${sourceNames.join(", ")}`);
+                }
+                return;
+              }
+              if (event === "heartbeat") {
+                const elapsed = Number.isFinite(payload?.elapsed_ms) ? payload.elapsed_ms : 0;
+                const tokens = Number.isFinite(payload?.tokens) ? payload.tokens : 0;
+                patchAssistant({
+                  status_text:
+                    tokens > 0
+                      ? `Writing... ${formatElapsedMs(elapsed)} • ${tokens} tokens`
+                      : `Working... ${formatElapsedMs(elapsed)}`,
+                });
+                return;
+              }
+              if (event === "token") {
+                const delta = typeof payload?.delta === "string" ? payload.delta : "";
+                if (!delta) return;
+                patchAssistant((msg) => ({
+                  ...msg,
+                  content: `${msg.content || ""}${delta}`,
+                  status_text: "Writing response...",
+                }));
+                return;
+              }
+              if (event === "done") {
+                patchAssistant((msg) => ({
+                  ...msg,
+                  content: payload?.answer || msg.content || "(No answer generated)",
+                  sources: Array.isArray(payload?.sources) ? payload.sources : [],
+                  created_at: new Date().toISOString(),
+                  status_text: "",
+                }));
+                if (payload?.session_id) {
+                  setActiveSessionId(payload.session_id);
+                  persistActiveSession(payload.session_id);
+                }
+                if (Number.isFinite(payload?.elapsed_ms)) {
+                  appendTrace("finalize", `Completed in ${formatElapsedMs(payload.elapsed_ms)}.`);
+                }
+                return;
+              }
+              if (event === "error" && payload?.detail) {
+                setError(`Streaming warning: ${payload.detail}`);
+                appendTrace("fallback", `Streaming warning: ${payload.detail}`);
+              }
+            },
+          },
+        );
       }
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: res.answer,
-          created_at: new Date().toISOString(),
-          sources: Array.isArray(res.sources) ? res.sources : [],
-        },
-      ]);
+
       if (kbId) {
         const refreshed = await listChatSessions(parseInt(kbId, 10));
         setSessions(sortSessionsByUpdatedDesc(Array.isArray(refreshed) ? refreshed : []));
@@ -360,15 +564,12 @@ export default function ChatPage() {
     } catch (err) {
       if (err?.status === 401) setError("Please log in to chat.");
       else setError(err?.message || "Chat failed");
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `Error: ${err?.message || "Chat failed"}`,
-          created_at: new Date().toISOString(),
-          sources: [],
-        },
-      ]);
+      patchAssistant({
+        content: `Error: ${err?.message || "Chat failed"}`,
+        created_at: new Date().toISOString(),
+        sources: [],
+        status_text: "",
+      });
     } finally {
       setLoading(false);
     }
@@ -618,6 +819,20 @@ export default function ChatPage() {
                         <p>{m.role === "user" ? "You" : "Assistant"}</p>
                         <span>{m.created_at ? formatRelativeTime(m.created_at) : ""}</span>
                       </div>
+                      {m.role === "assistant" && m.status_text && <p className="chatgpt-status-line">{m.status_text}</p>}
+                      {m.role === "assistant" && Array.isArray(m.trace) && m.trace.length > 0 && (
+                        <div className="chatgpt-trace-box">
+                          <p className="chatgpt-trace-title">Reasoning trace</p>
+                          <ul className="chatgpt-trace-list">
+                            {m.trace.map((item, idx) => (
+                              <li key={`${item.step}-${item.detail}-${idx}`}>
+                                <span className="chatgpt-trace-step">{reasoningStepLabel(item.step)}</span>
+                                <span className="chatgpt-trace-detail">{item.detail}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                       <p className="chatgpt-message-body">{m.content}</p>
                       {m.sources?.length > 0 && (
                         <div className="chatgpt-source-box">

@@ -30,5 +30,5 @@ def test_fallback_general_question_returns_compact_bullets():
     ]
     out = routes._fallback_answer_from_sources(question, sources, "ReadTimeout")
     assert "LLM unavailable (ReadTimeout)" in out
-    assert "Retrieved context:" in out
+    assert "Top retrieved excerpts:" in out
     assert "- Line one about product work. Line two about backend APIs." in out

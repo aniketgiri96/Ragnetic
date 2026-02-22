@@ -2,7 +2,8 @@
 
 ## Overview
 
-Ragnetic ingests documents asynchronously via a Celery pipeline: upload → object store → DB record → parse → chunk → embed → index in Qdrant.
+Ragnetic ingests documents asynchronously via Celery:
+upload -> object store -> DB record -> parse -> chunk -> embed -> Qdrant index.
 
 ## Document Types and Parsers
 
@@ -15,16 +16,18 @@ Parsers are selected by MIME type or file extension. They return plain text and 
 ## Chunking
 
 - **Hierarchical:** Split first by paragraph (double newline), then by size.
-- **Size and overlap:** Default max chunk size 800 characters, 100-character overlap to reduce boundary loss.
-- **Metadata:** Each chunk carries source filename, doc id, and any parser metadata for retrieval and citation.
+- **Size and overlap defaults:** `chunk_max_chars=600`, `chunk_overlap_chars=80`, `chunk_min_chars=180`.
+- **Oversize handling:** Long segments are split by sentence boundaries, with word-wrap fallback.
+- **Metadata:** Each chunk includes source metadata plus chunk index/count and character offsets.
 
 ## Pipeline Steps
 
 1. **Upload:** File stored in MinIO; `Document` row created with `object_key`, `content_hash`, `status=pending`.
-2. **Celery task:** `ingest_document(document_id)` loads file from MinIO, parses, chunks, embeds (sentence-transformers or stub), upserts vectors into the Qdrant collection for the document’s knowledge base.
-3. **Status:** Document status updated to `processing`, then `indexed` or `failed` (with `error_message`).
+2. **Celery task:** `ingest_document(document_id)` loads file, parses text, chunks it, embeds chunks, and upserts points into Qdrant.
+3. **Embedding mode:** Uses local `sentence-transformers` when available, otherwise deterministic pseudo-vectors for fallback/testing.
+4. **Status:** Document moves to `processing`, then `indexed` or `failed` with `error_message`.
 
 ## Idempotency and Dedup
 
 - `content_hash` (SHA-256) is stored and checked at upload time.
-- Re-uploading identical content into the same knowledge base returns the existing `document_id` (`deduplicated=true`) instead of re-enqueueing ingestion.
+- Re-uploading identical content into the same KB returns the existing `document_id` with `deduplicated=true` and skips re-enqueue.

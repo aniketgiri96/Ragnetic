@@ -24,7 +24,7 @@ class Settings(BaseSettings):
 
     ollama_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.2"
-    llm_timeout_seconds: int = 30
+    llm_timeout_seconds: int = 90
     llm_connect_timeout_seconds: int = 5
     llm_model_check_timeout_seconds: int = 3
     ollama_num_predict: int = 220

@@ -9,23 +9,23 @@
 | Enterprise | 16 CPU, 64 GB RAM, 1 TB NVMe (+ optional GPU) | 1M+ documents | Company-wide |
 | Cloud (e.g. AWS) | c5.2xlarge + r5.large DB | 100K+ (managed) | Cloud-hosted enterprise |
 
-## Embedding Models (Launch)
+## Embedding Runtime
 
-| Model | Dims | Speed | Quality | Best for |
-|-------|------|-------|---------|----------|
-| all-MiniLM-L6-v2 | 384 | Very fast | Good | Default balance |
-| BAAI/bge-large-en-v1.5 | 1024 | Medium | Excellent | High-quality production |
-| nomic-embed-text | 768 | Fast | Very good | Local (e.g. Ollama) |
-| text-embedding-3-small | 1536 | API | Excellent | OpenAI fallback |
-| text-embedding-3-large | 3072 | API | Best | Max quality (higher cost) |
+- Default embedding model: `all-MiniLM-L6-v2` (via `sentence-transformers`)
+- Vector dimension: `384`
+- Fallback mode: deterministic pseudo-vectors when `sentence-transformers` is not installed
 
-## LLMs (Launch)
+## LLM Provider Support (Current)
 
-| Model | Provider | Privacy | Quality | Notes |
-|-------|----------|--------|---------|--------|
-| Llama 3.1 8B | Ollama (local) | Full | Good | Default local; 8 GB VRAM or CPU |
-| Llama 3.1 70B | Ollama (local) | Full | Excellent | 48 GB+ VRAM |
-| Mistral 7B | Ollama (local) | Full | Good | Fast local option |
-| GPT-4o | OpenAI | None | Best | Cloud, max quality |
-| Claude 3.5 Sonnet | Anthropic | None | Best | Strong reasoning |
-| Gemini 1.5 Pro | Google | None | Excellent | Long context (1M tokens) |
+| Provider | Status | Notes |
+|----------|--------|-------|
+| Ollama | Supported (default) | Local model endpoint via `OLLAMA_URL`, model via `OLLAMA_MODEL` |
+| OpenAI | Supported (optional fallback) | Used when `OPENAI_API_KEY` is set and OpenAI SDK is installed |
+
+## Common Local Ollama Models
+
+| Model | Typical profile | Notes |
+|-------|-----------------|-------|
+| `llama3.2` | Balanced default | Good quality/latency for local use |
+| `mistral` | Faster responses | Lightweight option for CPU-bound hosts |
+| `llama3.1:70b` | High quality, high resource usage | Requires large GPU memory |
