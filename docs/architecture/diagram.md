@@ -9,7 +9,7 @@ flowchart TB
   end
 
   subgraph UI["Frontend"]
-    FE[Next.js 14 · Tailwind · Shadcn UI<br/>Dashboard · Chat · :3000]
+    FE[Next.js · React · Tailwind<br/>Dashboard · Chat · :3000]
   end
 
   subgraph API["Backend API"]
@@ -32,8 +32,8 @@ flowchart TB
     AUTH[Auth JWT] --> HYBRID[Hybrid search]
     HYBRID --> RERANK[Rerank]
     RERANK --> CTX[Context]
-    CTX --> LLM[Ollama / LLM]
-    LLM --> STREAM[Stream]
+    CTX --> LLM[Ollama / OpenAI]
+    LLM --> RESP[JSON response]
   end
 
   subgraph Data["Data & services"]
@@ -84,11 +84,11 @@ sequenceDiagram
   participant Qdrant as Qdrant
 
   U->>FE: Upload file
-  FE->>API: POST /upload
+  FE->>API: POST /upload/
   API->>Store: Store file
   API->>DB: Document record (pending)
   API->>Redis: Enqueue task
-  API-->>FE: 202 Accepted
+  API-->>FE: 200 {"status":"queued","document_id":...}
 
   Redis->>Worker: ingest_document
   Worker->>Store: Get file
@@ -108,12 +108,12 @@ sequenceDiagram
   participant LLM as Ollama/LLM
 
   U->>FE: Ask question
-  FE->>API: POST /chat (stream)
+  FE->>API: POST /chat/
   API->>API: Auth → Embed query
   API->>Qdrant: Hybrid search (vector + BM25)
   API->>API: Rerank → Build context
   API->>LLM: Prompt + context
-  LLM-->>API: Stream tokens
-  API-->>FE: SSE stream
+  LLM-->>API: Completion
+  API-->>FE: JSON response (answer + sources + session_id)
   FE-->>U: Answer + citations
 ```

@@ -16,6 +16,7 @@ class ChatRequest(BaseModel):
     message: str
     kb_id: Optional[int] = None
     session_id: Optional[str] = None
+    async_mode: Optional[bool] = None
 
 
 class AddMemberRequest(BaseModel):
@@ -94,6 +95,23 @@ async def chat_endpoint(
         message=body.message,
         kb_id=body.kb_id,
         session_id=body.session_id,
+        async_mode=body.async_mode,
+    )
+
+
+@app.post("/chat/stream")
+async def chat_stream_endpoint(
+    body: ChatRequest,
+    request: Request,
+    user=Depends(deps.get_current_user),
+):
+    ip = request.client.host if request and request.client else "unknown"
+    enforce_rate_limit("chat", key=f"user:{user.id}:ip:{ip}")
+    return await routes.chat_rag_stream(
+        user=user,
+        message=body.message,
+        kb_id=body.kb_id,
+        session_id=body.session_id,
     )
 
 
@@ -148,3 +166,8 @@ def get_chat_session(session_id: str, limit: int = Query(100, ge=1, le=500), use
 @app.delete("/chat/sessions/{session_id}", response_model=dict)
 def delete_chat_session(session_id: str, user=Depends(deps.get_current_user)):
     return routes.delete_chat_session(user=user, session_id=session_id)
+
+
+@app.get("/chat/jobs/{job_id}", response_model=dict)
+def get_chat_job(job_id: str, user=Depends(deps.get_current_user)):
+    return routes.get_chat_job(user=user, job_id=job_id)

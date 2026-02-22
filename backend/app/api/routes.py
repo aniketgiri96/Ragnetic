@@ -2,25 +2,29 @@
 from datetime import datetime
 import hashlib
 import io
+import json
 import logging
 import re
+import time
 import uuid
 from typing import Any
 
 from fastapi import File, Query, UploadFile
 from fastapi import HTTPException, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import desc
 
 from app.models.base import SessionLocal
-from app.models.chat import ChatMessage, ChatRole, ChatSession
+from app.models.chat import ChatJob, ChatJobStatus, ChatMessage, ChatRole, ChatSession
 from app.models.document import Document, DocumentStatus, KnowledgeBaseMembership, KnowledgeBaseRole
 from app.models.user import User
 from app.core.config import settings
 from app.services.access import get_default_accessible_kb_id, list_user_knowledge_bases, require_kb_access
 from app.services.llm import generate as llm_generate
+from app.services.llm import generate_stream as llm_generate_stream
 from app.services.retrieval import hybrid_retrieve
 from app.services.storage import upload_file
+from app.tasks.chat import process_chat_job
 from app.tasks.ingestion import ingest_document
 
 VALID_KB_ROLES = {
@@ -29,38 +33,10 @@ VALID_KB_ROLES = {
     KnowledgeBaseRole.VIEWER,
 }
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-TECH_QUERY_RE = re.compile(r"\b(tech stack|technology|technologies|skills?|tools?)\b", re.IGNORECASE)
-TECH_TERMS = [
-    "Python",
-    "JavaScript",
-    "TypeScript",
-    "React",
-    "Next.js",
-    "Material UI",
-    "Tailwind",
-    "FastAPI",
-    "Flask",
-    "Django",
-    "Node.js",
-    "Express",
-    "PostgreSQL",
-    "MySQL",
-    "MongoDB",
-    "Supabase",
-    "Redis",
-    "WebSockets",
-    "SSE",
-    "Docker",
-    "Kubernetes",
-    "AWS",
-    "GCP",
-    "Azure",
-    "Git",
-    "CI/CD",
-    "Jira",
-    "LangChain",
-    "OpenAI",
-]
+ASYNC_HINT_RE = re.compile(
+    r"\b(long|detailed|in-depth|comprehensive|elaborate|step[- ]by[- ]step|thorough|bullet)\b",
+    re.IGNORECASE,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -76,6 +52,41 @@ def _normalize_session_id(session_id: str | None) -> str:
             detail="session_id must be 1-128 chars and contain only letters, numbers, ., _, :, -",
         )
     return normalized
+
+
+def _should_queue_async(message: str) -> bool:
+    normalized = (message or "").strip()
+    if len(normalized) >= 260:
+        return True
+    return bool(ASYNC_HINT_RE.search(normalized))
+
+
+def _sse(event: str, payload: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=True)}\n\n"
+
+
+def _reasoning_event(step: str, detail: str, elapsed_ms: int) -> dict[str, Any]:
+    return {
+        "step": step,
+        "detail": detail,
+        "elapsed_ms": elapsed_ms,
+    }
+
+
+def _source_previews(sources: list[dict[str, Any]], limit: int = 3) -> list[dict[str, Any]]:
+    previews: list[dict[str, Any]] = []
+    for i, item in enumerate(sources[:limit]):
+        metadata = item.get("metadata") or {}
+        name = metadata.get("source") or metadata.get("filename") or f"Source {i + 1}"
+        snippet = (item.get("snippet") or "").replace("\n", " ").strip()
+        previews.append(
+            {
+                "name": name,
+                "score": float(item.get("score", 0.0)),
+                "snippet_preview": snippet[:120] + ("..." if len(snippet) > 120 else ""),
+            }
+        )
+    return previews
 
 
 def _get_or_create_chat_session(db, user_id: int, kb_id: int, session_id: str) -> ChatSession:
@@ -212,15 +223,20 @@ def _retrieve_for_chat(kb_id: int, query: str, limit: int = 5) -> list[dict[str,
         ) from e
 
 
-def _extract_tech_terms(text: str, max_items: int = 14) -> list[str]:
-    lower = text.lower()
-    found: list[str] = []
-    for term in TECH_TERMS:
-        if term.lower() in lower and term not in found:
-            found.append(term)
-        if len(found) >= max_items:
-            break
-    return found
+def _build_chat_prompt(message: str, history: str, sources: list[dict[str, Any]]) -> tuple[str, str, str]:
+    source_char_limit = max(120, settings.chat_context_max_chars_per_source)
+    context_blocks = "\n\n---\n\n".join(
+        f"[Source {i + 1}]\n{(s['snippet'] or '')[:source_char_limit]}" for i, s in enumerate(sources)
+    )
+    system = (
+        "Answer only using the provided context blocks for factual claims. "
+        "Use conversation history only for continuity. "
+        "If context is insufficient, explicitly say so and do not fabricate facts. "
+        "Mention source numbers when possible."
+    )
+    history_block = f"Conversation history:\n{history}\n\n" if history else ""
+    user_prompt = f"{history_block}Context:\n\n{context_blocks}\n\nQuestion: {message}"
+    return system, user_prompt, context_blocks
 
 
 def _fallback_answer_from_sources(question: str, sources: list[dict[str, Any]], detail: str) -> str:
@@ -232,26 +248,70 @@ def _fallback_answer_from_sources(question: str, sources: list[dict[str, Any]], 
     if not snippets:
         return f"LLM unavailable ({detail}). No retrieved content is available yet."
 
-    corpus = " ".join(snippets[:5])
-    if TECH_QUERY_RE.search(question):
-        terms = _extract_tech_terms(corpus)
-        if terms:
-            return (
-                f"LLM unavailable ({detail}). Based on retrieved content, the tech stack appears to include: "
-                f"{', '.join(terms)}."
-            )
-
     preview_lines = []
     for snippet in snippets[:3]:
         cut = snippet[:220] + ("..." if len(snippet) > 220 else "")
         preview_lines.append(f"- {cut}")
-    return f"LLM unavailable ({detail}). Retrieved context:\n" + "\n".join(preview_lines)
+    return (
+        f"LLM unavailable ({detail}). I could not generate a model answer. "
+        "Top retrieved excerpts:\n" + "\n".join(preview_lines)
+    )
 
 
-async def chat_rag(user: User, message: str, kb_id: int | None = None, session_id: str | None = None) -> dict:
-    """RAG chat: retrieve chunks, build prompt, call LLM, return answer + sources."""
+def _queue_async_chat_job(user: User, kb: int, session_key: str, message: str) -> dict[str, Any]:
+    job_id = uuid.uuid4().hex
+    db = SessionLocal()
+    try:
+        _get_or_create_chat_session(db, user_id=user.id, kb_id=kb, session_id=session_key)
+        db.add(ChatMessage(session_id=session_key, role=ChatRole.USER, content=message))
+
+        job = ChatJob(
+            id=job_id,
+            user_id=user.id,
+            knowledge_base_id=kb,
+            session_id=session_key,
+            question=message,
+            status=ChatJobStatus.QUEUED,
+        )
+        db.add(job)
+        db.commit()
+    finally:
+        db.close()
+
+    try:
+        process_chat_job.delay(job_id)
+    except Exception as exc:
+        db2 = SessionLocal()
+        try:
+            failed_job = db2.query(ChatJob).filter(ChatJob.id == job_id).first()
+            if failed_job is not None:
+                failed_job.status = ChatJobStatus.FAILED
+                failed_job.error_message = str(exc)
+                failed_job.finished_at = datetime.utcnow()
+                db2.commit()
+        finally:
+            db2.close()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to queue chat job. Check worker and broker availability.",
+        ) from exc
+    return {"mode": "async", "status": ChatJobStatus.QUEUED, "job_id": job_id, "session_id": session_key}
+
+
+async def chat_rag(
+    user: User,
+    message: str,
+    kb_id: int | None = None,
+    session_id: str | None = None,
+    async_mode: bool | None = None,
+) -> dict:
+    """RAG chat: sync response for short queries, async job for long ones."""
     kb = _resolve_kb_for_user(user, kb_id, min_role=KnowledgeBaseRole.VIEWER)
     session_key = _normalize_session_id(session_id)
+    should_queue_async = async_mode if async_mode is not None else _should_queue_async(message)
+    if should_queue_async:
+        return _queue_async_chat_job(user=user, kb=kb, session_key=session_key, message=message)
+
     db = SessionLocal()
     try:
         session = _get_or_create_chat_session(db, user_id=user.id, kb_id=kb, session_id=session_key)
@@ -259,10 +319,7 @@ async def chat_rag(user: User, message: str, kb_id: int | None = None, session_i
 
         source_limit = max(1, settings.chat_context_max_sources)
         sources: list[dict[str, Any]] = _retrieve_for_chat(kb, message, limit=source_limit)
-        source_char_limit = max(120, settings.chat_context_max_chars_per_source)
-        context_blocks = "\n\n---\n\n".join(
-            f"[Source {i+1}]\n{(s['snippet'] or '')[:source_char_limit]}" for i, s in enumerate(sources)
-        )
+        system, user_prompt, context_blocks = _build_chat_prompt(message=message, history=history, sources=sources)
         if not context_blocks:
             answer = "No relevant documents found in the selected knowledge base yet. Upload documents and try again."
             db.add(ChatMessage(session_id=session_key, role=ChatRole.USER, content=message))
@@ -271,18 +328,11 @@ async def chat_rag(user: User, message: str, kb_id: int | None = None, session_i
             db.commit()
             return {"answer": answer, "sources": [], "session_id": session_key}
 
-        system = (
-            "Answer only using the provided context blocks for factual claims. "
-            "Use conversation history only for continuity. "
-            "If context is insufficient, explicitly say so and do not fabricate facts. "
-            "Mention source numbers when possible."
-        )
-        history_block = f"Conversation history:\n{history}\n\n" if history else ""
-        user_prompt = f"{history_block}Context:\n\n{context_blocks}\n\nQuestion: {message}"
         try:
             answer = await llm_generate(user_prompt, system=system)
         except Exception as e:
             detail = str(e).strip() or e.__class__.__name__
+            logger.warning("LLM generation failed for kb_id=%s session_id=%s: %s", kb, session_key, detail)
             answer = _fallback_answer_from_sources(message, sources, detail)
 
         db.add(ChatMessage(session_id=session_key, role=ChatRole.USER, content=message))
@@ -290,6 +340,169 @@ async def chat_rag(user: User, message: str, kb_id: int | None = None, session_i
         session.updated_at = datetime.utcnow()
         db.commit()
         return {"answer": answer, "sources": sources, "session_id": session_key}
+    finally:
+        db.close()
+
+
+async def chat_rag_stream(
+    user: User,
+    message: str,
+    kb_id: int | None = None,
+    session_id: str | None = None,
+) -> StreamingResponse:
+    """RAG chat streaming endpoint returning SSE token events."""
+    kb = _resolve_kb_for_user(user, kb_id, min_role=KnowledgeBaseRole.VIEWER)
+    session_key = _normalize_session_id(session_id)
+
+    db = SessionLocal()
+    try:
+        session = _get_or_create_chat_session(db, user_id=user.id, kb_id=kb, session_id=session_key)
+        history = _history_for_prompt(db, session_key, max_messages=10)
+        db.add(ChatMessage(session_id=session_key, role=ChatRole.USER, content=message))
+        session.updated_at = datetime.utcnow()
+        db.commit()
+    finally:
+        db.close()
+
+    async def event_stream():
+        started_at = time.monotonic()
+        source_limit = max(1, settings.chat_context_max_sources)
+        sources: list[dict[str, Any]] = []
+        answer = ""
+        fallback = False
+        last_heartbeat = started_at
+
+        def elapsed_ms() -> int:
+            return int((time.monotonic() - started_at) * 1000)
+
+        yield _sse("meta", {"session_id": session_key, "trace_mode": "public"})
+        yield _sse("reasoning", _reasoning_event("understand", "Understanding your question.", elapsed_ms()))
+        yield _sse("reasoning", _reasoning_event("retrieve", "Searching relevant knowledge base content.", elapsed_ms()))
+
+        try:
+            sources = _retrieve_for_chat(kb, message, limit=source_limit)
+        except HTTPException as e:
+            detail = str(e.detail).strip() if getattr(e, "detail", None) else "Retrieval backend unavailable"
+            fallback = True
+            answer = f"Retrieval unavailable ({detail}). Please try again shortly."
+            yield _sse("error", {"detail": detail, "stage": "retrieve"})
+            yield _sse("reasoning", _reasoning_event("fallback", "Switching to fallback mode.", elapsed_ms()))
+            sources = []
+        else:
+            yield _sse(
+                "reasoning",
+                _reasoning_event("evidence", f"Found {len(sources)} relevant chunks.", elapsed_ms()),
+            )
+            previews = _source_previews(sources, limit=3)
+            if previews:
+                yield _sse("sources_preview", {"sources": previews, "elapsed_ms": elapsed_ms()})
+
+        system = ""
+        user_prompt = ""
+        context_blocks = ""
+        if not fallback:
+            system, user_prompt, context_blocks = _build_chat_prompt(message=message, history=history, sources=sources)
+
+            if not context_blocks:
+                fallback = True
+                answer = "No relevant documents found in the selected knowledge base yet. Upload documents and try again."
+                yield _sse("reasoning", _reasoning_event("no_context", "No grounded context found for this question.", elapsed_ms()))
+            else:
+                chunks: list[str] = []
+                first_token = True
+                yield _sse("reasoning", _reasoning_event("draft", "Drafting an answer from retrieved evidence.", elapsed_ms()))
+                try:
+                    async for chunk in llm_generate_stream(user_prompt, system=system):
+                        if not chunk:
+                            continue
+                        if first_token:
+                            first_token = False
+                            yield _sse("reasoning", _reasoning_event("evolve", "Evolving response in real time.", elapsed_ms()))
+                        chunks.append(chunk)
+                        yield _sse("token", {"delta": chunk})
+                        now = time.monotonic()
+                        if now - last_heartbeat >= 2.5:
+                            last_heartbeat = now
+                            yield _sse(
+                                "heartbeat",
+                                {
+                                    "state": "generating",
+                                    "elapsed_ms": elapsed_ms(),
+                                    "tokens": len(chunks),
+                                },
+                            )
+                except Exception as e:
+                    detail = str(e).strip() or e.__class__.__name__
+                    logger.warning("Streaming LLM failed for kb_id=%s session_id=%s: %s", kb, session_key, detail)
+                    fallback = True
+                    answer = _fallback_answer_from_sources(message, sources, detail)
+                    yield _sse("error", {"detail": detail, "stage": "generate"})
+                    yield _sse("reasoning", _reasoning_event("fallback", "LLM unavailable. Returning extractive fallback.", elapsed_ms()))
+                if not fallback:
+                    answer = "".join(chunks).strip() or "No response generated."
+
+        db2 = SessionLocal()
+        try:
+            session = _get_or_create_chat_session(db2, user_id=user.id, kb_id=kb, session_id=session_key)
+            db2.add(ChatMessage(session_id=session_key, role=ChatRole.ASSISTANT, content=answer))
+            session.updated_at = datetime.utcnow()
+            db2.commit()
+        finally:
+            db2.close()
+
+        yield _sse("reasoning", _reasoning_event("finalize", "Finalizing response and sources.", elapsed_ms()))
+        yield _sse(
+            "done",
+            {
+                "answer": answer,
+                "sources": sources,
+                "session_id": session_key,
+                "fallback": fallback,
+                "elapsed_ms": elapsed_ms(),
+            },
+        )
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def get_chat_job(user: User, job_id: str) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        job = (
+            db.query(ChatJob)
+            .filter(ChatJob.id == job_id, ChatJob.user_id == user.id)
+            .first()
+        )
+        if job is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat job not found")
+        require_kb_access(db, user.id, job.knowledge_base_id, min_role=KnowledgeBaseRole.VIEWER)
+        sources: list[dict[str, Any]] = []
+        if job.sources_json:
+            try:
+                parsed = json.loads(job.sources_json)
+                if isinstance(parsed, list):
+                    sources = parsed
+            except json.JSONDecodeError:
+                sources = []
+        return {
+            "job_id": job.id,
+            "status": job.status,
+            "session_id": job.session_id,
+            "answer": job.answer,
+            "sources": sources,
+            "error_message": job.error_message,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+        }
     finally:
         db.close()
 

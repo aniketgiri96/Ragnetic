@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --font-family-sans: "Special Elite", "Courier New", "Lucida Console", monospace;
+  --font-family-sans:  "Courier New", "Lucida Console", monospace;
 }
 
 @layer base {
@@ -880,6 +880,58 @@
 
   .chatgpt-message-head.is-user {
     color: #cbd5e1;
+  }
+
+  .chatgpt-status-line {
+    margin-top: 0.24rem;
+    color: #2563eb;
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    font-weight: 700;
+  }
+
+  .chatgpt-trace-box {
+    margin-top: 0.42rem;
+    border: 1px solid #dbeafe;
+    border-radius: 0.72rem;
+    background: #f8fbff;
+    padding: 0.42rem 0.52rem;
+  }
+
+  .chatgpt-trace-title {
+    font-size: 0.64rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #1e3a8a;
+    font-weight: 700;
+  }
+
+  .chatgpt-trace-list {
+    margin-top: 0.28rem;
+    display: grid;
+    gap: 0.24rem;
+    font-size: 0.78rem;
+    color: #334155;
+    list-style: none;
+    padding: 0;
+  }
+
+  .chatgpt-trace-list li {
+    display: grid;
+    gap: 0.08rem;
+    border-left: 2px solid #bfdbfe;
+    padding-left: 0.5rem;
+  }
+
+  .chatgpt-trace-step {
+    color: #1d4ed8;
+    font-weight: 700;
+    font-size: 0.73rem;
+  }
+
+  .chatgpt-trace-detail {
+    color: #334155;
+    line-height: 1.35;
   }
 
   .chatgpt-message-body {

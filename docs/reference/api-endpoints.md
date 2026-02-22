@@ -150,12 +150,21 @@ Success response:
 {
   "filename": "employee-handbook.pdf",
   "status": "queued",
-  "document_id": 12,
-  "deduplicated": false
+  "document_id": 12
 }
 ```
 
-If identical content already exists in the same knowledge base, upload returns the existing `document_id` with `deduplicated: true`.
+If identical content already exists in the same knowledge base, upload returns the existing `document_id` and includes `deduplicated: true`:
+
+```json
+{
+  "filename": "employee-handbook.pdf",
+  "status": "queued",
+  "document_id": 12,
+  "deduplicated": true,
+  "message": "Identical content already queued/indexed in this knowledge base."
+}
+```
 
 ### `GET /documents/{document_id}/status`
 Get ingestion status for a document.
@@ -209,6 +218,8 @@ Success response:
 ### `POST /chat/`
 Ask a question and receive an answer grounded in retrieved document chunks.
 
+Response mode: non-streaming JSON.
+
 Auth: `Authorization: Bearer <token>` required.
 Rate limit: 90 requests/minute per user+IP.
 
@@ -218,7 +229,8 @@ Request body:
 {
   "message": "What is our PTO policy?",
   "kb_id": 1,
-  "session_id": "optional-session-id"
+  "session_id": "optional-session-id",
+  "async_mode": false
 }
 ```
 
@@ -231,6 +243,7 @@ Success response:
   "sources": [
     {
       "snippet": "...",
+      "score": 0.812,
       "metadata": {
         "source": "employee-handbook.pdf",
         "doc_id": 12
@@ -241,6 +254,34 @@ Success response:
 ```
 
 `session_id` is optional in request, but recommended. If omitted, server creates a new session ID and returns it.
+
+If `async_mode=true` (or server heuristics classify the prompt as long-running), response is queued:
+
+```json
+{
+  "mode": "async",
+  "status": "queued",
+  "job_id": "9bc6c3ea6dc149aeb8492444b91f7482",
+  "session_id": "optional-session-id"
+}
+```
+
+### `POST /chat/stream`
+Stream chat tokens using Server-Sent Events (SSE).
+
+Auth: `Authorization: Bearer <token>` required.
+Rate limit: 90 requests/minute per user+IP.
+
+Request body is the same as `POST /chat/` (except `async_mode` is ignored).
+
+Event stream:
+- `event: meta` with `session_id`
+- `event: reasoning` with public pipeline steps (`understand`, `retrieve`, `evidence`, `draft`, `evolve`, `finalize`, etc.)
+- `event: sources_preview` with early top-source names/scores before final answer
+- `event: heartbeat` with progress telemetry (`elapsed_ms`, token count while generating)
+- `event: token` with incremental `delta`
+- `event: error` when generation errors occur
+- `event: done` with final `{ answer, sources, session_id, fallback }`
 
 ## Chat Sessions
 
@@ -264,6 +305,29 @@ Query params:
 Delete a chat session and its messages.
 
 Auth: `Authorization: Bearer <token>` required.
+
+## Chat Jobs
+
+### `GET /chat/jobs/{job_id}`
+Get status/result for a queued long-running chat job.
+
+Auth: `Authorization: Bearer <token>` required.
+
+Success response:
+
+```json
+{
+  "job_id": "9bc6c3ea6dc149aeb8492444b91f7482",
+  "status": "completed",
+  "session_id": "optional-session-id",
+  "answer": "...",
+  "sources": [],
+  "error_message": null,
+  "created_at": "2026-02-22T10:10:10.000000",
+  "started_at": "2026-02-22T10:10:11.000000",
+  "finished_at": "2026-02-22T10:10:18.000000"
+}
+```
 
 ## Health
 

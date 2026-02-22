@@ -7,7 +7,7 @@ celery_app = Celery(
     "ragnetic",
     broker=settings.broker_url,
     backend=settings.result_backend,
-    include=["app.tasks.ingestion"],
+    include=["app.tasks.ingestion", "app.tasks.chat"],
 )
 
 celery_app.conf.update(

@@ -1,5 +1,15 @@
 # Documentation Index
 
+## Project and community
+
+- [Project README](../README.md)
+- [Contributing](../CONTRIBUTING.md)
+- [Code of Conduct](../CODE_OF_CONDUCT.md)
+- [Security policy](../SECURITY.md)
+- [Support](../SUPPORT.md)
+- [Changelog](../CHANGELOG.md)
+- [License](../LICENSE)
+
 ## Product and strategy
 
 - [Vision and goals](vision-and-goals.md)

@@ -8,6 +8,8 @@ The enterprise knowledge management market is shifting: organizations want priva
 
 ## Target Dimensions
 
+These are roadmap targets, not a complete list of currently shipped capabilities.
+
 | Dimension | Current market norm | Ragnetic target |
 |-----------|----------------------|----------------|
 | Time to first query | 2–8 hours setup | &lt; 5 minutes (Docker) |
@@ -15,11 +17,11 @@ The enterprise knowledge management market is shifting: organizations want priva
 | Data sources | 1–2 manually | 10+ auto-ingested connectors |
 | Multi-user support | None or paid-only | Built-in RBAC, free and open |
 | Documentation | Sparse / outdated | 10x better, with video guides |
-| Deployment | Complex configs | Single `docker-compose up` |
+| Deployment | Complex configs | Single `docker compose up` |
 
 ## Goals
 
 - **Simplicity + power:** 5-minute Docker deploy with enterprise-grade features.
 - **Documentation-first:** Invest in docs, tutorials, architecture guides, and contribution guidelines.
 - **Beautiful UX:** Polished Next.js dashboard that non-technical users can adopt.
-- **Multi-source ingestion:** PDFs, Confluence, Slack, GitHub, emails, Notion supported from the start.
+- **Multi-source ingestion roadmap:** Expand beyond file uploads to connectors such as Confluence, Slack, GitHub, email, and Notion.
