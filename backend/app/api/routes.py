@@ -22,8 +22,9 @@ from app.core.config import settings
 from app.services.access import get_default_accessible_kb_id, list_user_knowledge_bases, require_kb_access
 from app.services.llm import generate as llm_generate
 from app.services.llm import generate_stream as llm_generate_stream
+from app.services.qdrant_client import delete_document_chunks
 from app.services.retrieval import hybrid_retrieve
-from app.services.storage import upload_file
+from app.services.storage import delete_file, upload_file
 from app.tasks.chat import process_chat_job
 from app.tasks.ingestion import ingest_document
 
@@ -139,19 +140,39 @@ def _resolve_kb_for_user(user: User, kb_id: int | None, min_role: str) -> int:
         db.close()
 
 
+def _normalize_document_filename(filename: str) -> str:
+    normalized = (filename or "").strip()
+    if not normalized:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="filename cannot be empty.")
+    if len(normalized) > 512:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="filename exceeds 512 characters.")
+    return normalized
+
+
 async def upload_document(
     user: User,
     file: UploadFile = File(...),
     kb_id: int = Query(None, description="Knowledge base ID"),
+    replace_existing: bool = True,
 ):
     content = await file.read()
     kb = _resolve_kb_for_user(user, kb_id, min_role=KnowledgeBaseRole.EDITOR)
+    filename = _normalize_document_filename(file.filename or "")
     try:
-        object_key = f"uploads/{uuid.uuid4().hex}/{file.filename}"
+        object_key = f"uploads/{uuid.uuid4().hex}/{filename}"
         content_hash = hashlib.sha256(content).hexdigest()
         db = SessionLocal()
         try:
-            existing = (
+            existing_by_name = (
+                db.query(Document)
+                .filter(
+                    Document.knowledge_base_id == kb,
+                    Document.filename == filename,
+                )
+                .order_by(Document.id.desc())
+                .first()
+            )
+            existing_by_hash = (
                 db.query(Document)
                 .filter(
                     Document.knowledge_base_id == kb,
@@ -161,24 +182,118 @@ async def upload_document(
                 .order_by(Document.id.desc())
                 .first()
             )
-            if existing:
+
+            if (
+                existing_by_name is not None
+                and existing_by_name.content_hash == content_hash
+                and existing_by_name.status in [DocumentStatus.PENDING, DocumentStatus.PROCESSING, DocumentStatus.INDEXED]
+            ):
                 return {
-                    "filename": file.filename,
+                    "filename": filename,
                     "status": "queued",
-                    "document_id": existing.id,
+                    "document_id": existing_by_name.id,
                     "deduplicated": True,
                     "message": "Identical content already queued/indexed in this knowledge base.",
                 }
 
+            if existing_by_name is not None:
+                if not replace_existing:
+                    return {
+                        "filename": filename,
+                        "status": "exists",
+                        "document_id": existing_by_name.id,
+                        "replace_required": True,
+                        "message": "File already exists in this knowledge base. Set replace_existing=true to replace it.",
+                    }
+                if existing_by_name.status == DocumentStatus.PROCESSING:
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Document is currently processing. Try replacing again after indexing finishes.",
+                    )
+
+                old_object_key = existing_by_name.object_key
+                upload_file(object_key, io.BytesIO(content), len(content), file.content_type or "application/octet-stream")
+                existing_by_name.object_key = object_key
+                existing_by_name.content_hash = content_hash
+                existing_by_name.status = DocumentStatus.PENDING
+                existing_by_name.error_message = None
+                db.commit()
+                db.refresh(existing_by_name)
+
+                try:
+                    delete_document_chunks(kb_id=kb, doc_id=existing_by_name.id)
+                except Exception as cleanup_err:
+                    logger.warning(
+                        "Replace pre-cleanup skipped for kb_id=%s document_id=%s: %s",
+                        kb,
+                        existing_by_name.id,
+                        cleanup_err,
+                    )
+                delete_file(old_object_key)
+
+                stale_same_name_docs = (
+                    db.query(Document)
+                    .filter(
+                        Document.knowledge_base_id == kb,
+                        Document.filename == filename,
+                        Document.id != existing_by_name.id,
+                    )
+                    .all()
+                )
+                for stale_doc in stale_same_name_docs:
+                    try:
+                        delete_document_chunks(kb_id=kb, doc_id=stale_doc.id)
+                    except Exception as stale_cleanup_err:
+                        logger.warning(
+                            "Stale duplicate cleanup skipped for kb_id=%s document_id=%s: %s",
+                            kb,
+                            stale_doc.id,
+                            stale_cleanup_err,
+                        )
+                    delete_file(stale_doc.object_key)
+                    db.delete(stale_doc)
+                if stale_same_name_docs:
+                    db.commit()
+
+                try:
+                    ingest_document.delay(existing_by_name.id)
+                except Exception as queue_err:
+                    existing_by_name.status = DocumentStatus.FAILED
+                    existing_by_name.error_message = str(queue_err)
+                    db.commit()
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="Failed to queue replacement ingestion job.",
+                    ) from queue_err
+
+                return {
+                    "filename": filename,
+                    "status": "queued",
+                    "document_id": existing_by_name.id,
+                    "replaced": True,
+                    "message": "Existing file replaced and re-indexing started.",
+                }
+
+            if existing_by_hash:
+                return {
+                    "filename": filename,
+                    "status": "queued",
+                    "document_id": existing_by_hash.id,
+                    "deduplicated": True,
+                    "message": "Identical content already exists in this knowledge base.",
+                }
+
             upload_file(object_key, io.BytesIO(content), len(content), file.content_type or "application/octet-stream")
-            doc = Document(knowledge_base_id=kb, filename=file.filename, object_key=object_key, content_hash=content_hash)
+            doc = Document(knowledge_base_id=kb, filename=filename, object_key=object_key, content_hash=content_hash)
             db.add(doc)
             db.commit()
             db.refresh(doc)
             ingest_document.delay(doc.id)
-            return {"filename": file.filename, "status": "queued", "document_id": doc.id}
+            return {"filename": filename, "status": "queued", "document_id": doc.id}
         finally:
             db.close()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -535,6 +650,129 @@ def get_document_status(user: User, document_id: int) -> dict | None:
             return None
         require_kb_access(db, user.id, doc.knowledge_base_id, min_role=KnowledgeBaseRole.VIEWER)
         return {"document_id": doc.id, "filename": doc.filename, "status": doc.status, "error_message": doc.error_message}
+    finally:
+        db.close()
+
+
+def list_documents(user: User, kb_id: int | None = None) -> list[dict[str, Any]]:
+    kb = _resolve_kb_for_user(user, kb_id, min_role=KnowledgeBaseRole.VIEWER)
+    db = SessionLocal()
+    try:
+        docs = (
+            db.query(Document)
+            .filter(Document.knowledge_base_id == kb)
+            .order_by(Document.created_at.desc(), Document.id.desc())
+            .all()
+        )
+        return [
+            {
+                "document_id": d.id,
+                "kb_id": d.knowledge_base_id,
+                "filename": d.filename,
+                "status": d.status,
+                "error_message": d.error_message,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+            }
+            for d in docs
+        ]
+    finally:
+        db.close()
+
+
+def rename_document(user: User, document_id: int, filename: str) -> dict[str, Any]:
+    new_filename = _normalize_document_filename(filename)
+    db = SessionLocal()
+    try:
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if doc is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        require_kb_access(db, user.id, doc.knowledge_base_id, min_role=KnowledgeBaseRole.EDITOR)
+
+        conflict = (
+            db.query(Document)
+            .filter(
+                Document.knowledge_base_id == doc.knowledge_base_id,
+                Document.filename == new_filename,
+                Document.id != doc.id,
+            )
+            .first()
+        )
+        if conflict is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Another document with the same filename already exists in this knowledge base.",
+            )
+        if doc.status == DocumentStatus.PROCESSING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Document is currently processing. Rename is blocked until processing finishes.",
+            )
+
+        doc.filename = new_filename
+        doc.status = DocumentStatus.PENDING
+        doc.error_message = None
+        db.commit()
+        db.refresh(doc)
+
+        try:
+            delete_document_chunks(kb_id=doc.knowledge_base_id, doc_id=doc.id)
+        except Exception as cleanup_err:
+            logger.warning(
+                "Rename pre-cleanup skipped for kb_id=%s document_id=%s: %s",
+                doc.knowledge_base_id,
+                doc.id,
+                cleanup_err,
+            )
+
+        try:
+            ingest_document.delay(doc.id)
+        except Exception as queue_err:
+            doc.status = DocumentStatus.FAILED
+            doc.error_message = str(queue_err)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Failed to queue re-indexing job after rename.",
+            ) from queue_err
+
+        return {
+            "document_id": doc.id,
+            "kb_id": doc.knowledge_base_id,
+            "filename": doc.filename,
+            "status": doc.status,
+            "message": "Document renamed and re-indexing queued.",
+        }
+    finally:
+        db.close()
+
+
+def delete_document(user: User, document_id: int) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if doc is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        require_kb_access(db, user.id, doc.knowledge_base_id, min_role=KnowledgeBaseRole.EDITOR)
+        if doc.status == DocumentStatus.PROCESSING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Document is currently processing. Delete is blocked until processing finishes.",
+            )
+
+        try:
+            delete_document_chunks(kb_id=doc.knowledge_base_id, doc_id=doc.id)
+        except Exception as cleanup_err:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Failed to remove document chunks from vector store: {cleanup_err}",
+            ) from cleanup_err
+
+        delete_file(doc.object_key)
+
+        payload = {"message": "Document deleted.", "document_id": doc.id}
+        db.delete(doc)
+        db.commit()
+        return payload
     finally:
         db.close()
 

@@ -140,6 +140,7 @@ Rate limit: 30 requests/minute per user+IP.
 
 Query params:
 - `kb_id` (optional): target knowledge base ID
+- `replace_existing` (optional, default `true`): if `true`, uploading a file with the same filename in the same KB replaces the existing document and re-indexes it
 
 Form-data:
 - `file`: PDF, TXT, MD, or DOCX
@@ -166,6 +167,54 @@ If identical content already exists in the same knowledge base, upload returns t
 }
 ```
 
+If same filename exists and `replace_existing=true`, upload replaces that document (same `document_id`) and re-indexes:
+
+```json
+{
+  "filename": "employee-handbook.pdf",
+  "status": "queued",
+  "document_id": 12,
+  "replaced": true,
+  "message": "Existing file replaced and re-indexing started."
+}
+```
+
+If same filename exists and `replace_existing=false`, server returns:
+
+```json
+{
+  "filename": "employee-handbook.pdf",
+  "status": "exists",
+  "document_id": 12,
+  "replace_required": true,
+  "message": "File already exists in this knowledge base. Set replace_existing=true to replace it."
+}
+```
+
+### `GET /documents`
+List uploaded documents for a knowledge base.
+
+Auth: `Authorization: Bearer <token>` required.
+Permission: `viewer` or higher on KB.
+
+Query params:
+- `kb_id` (optional, defaults to first accessible KB)
+
+Success response:
+
+```json
+[
+  {
+    "document_id": 12,
+    "kb_id": 1,
+    "filename": "employee-handbook.pdf",
+    "status": "indexed",
+    "error_message": null,
+    "created_at": "2026-02-22T12:00:00.000000"
+  }
+]
+```
+
 ### `GET /documents/{document_id}/status`
 Get ingestion status for a document.
 
@@ -183,6 +232,35 @@ Success response:
 ```
 
 Possible statuses: `pending`, `processing`, `indexed`, `failed`.
+
+### `PATCH /documents/{document_id}`
+Rename a document.
+
+Auth: `Authorization: Bearer <token>` required.
+Permission: `editor` or higher on the KB.
+
+Request body:
+
+```json
+{
+  "filename": "handbook-v2.pdf"
+}
+```
+
+Behavior:
+- Updates filename
+- Re-indexes document so source metadata matches new name
+
+### `DELETE /documents/{document_id}`
+Delete a document.
+
+Auth: `Authorization: Bearer <token>` required.
+Permission: `editor` or higher on the KB.
+
+Behavior:
+- Deletes vector chunks for that `doc_id`
+- Deletes stored file object
+- Removes document record from PostgreSQL
 
 ## Retrieval
 

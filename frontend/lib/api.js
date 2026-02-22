@@ -44,10 +44,13 @@ export async function listKb() {
   return res.json();
 }
 
-export async function uploadFile(file, kbId) {
+export async function uploadFile(file, kbId, { replaceExisting = true } = {}) {
   const form = new FormData();
   form.append("file", file);
-  const url = kbId != null ? `${API}/upload/?kb_id=${kbId}` : `${API}/upload/`;
+  const params = new URLSearchParams();
+  if (kbId != null) params.set("kb_id", String(kbId));
+  params.set("replace_existing", replaceExisting ? "true" : "false");
+  const url = `${API}/upload/?${params.toString()}`;
   const headers = {};
   if (typeof window !== "undefined" && localStorage.getItem("ragnetic_token"))
     headers["Authorization"] = `Bearer ${localStorage.getItem("ragnetic_token")}`;
@@ -137,6 +140,34 @@ export async function chatStream(body, { onEvent } = {}) {
 
 export async function documentStatus(id) {
   const res = await fetch(`${API}/documents/${id}/status`, { headers: getHeaders() });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function listDocuments(kbId) {
+  const params = new URLSearchParams();
+  if (kbId != null) params.set("kb_id", String(kbId));
+  const url = params.toString() ? `${API}/documents?${params}` : `${API}/documents`;
+  const res = await fetch(url, { headers: getHeaders() });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function renameDocument(documentId, filename) {
+  const res = await fetch(`${API}/documents/${encodeURIComponent(documentId)}`, {
+    method: "PATCH",
+    headers: getHeaders(),
+    body: JSON.stringify({ filename }),
+  });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function deleteDocument(documentId) {
+  const res = await fetch(`${API}/documents/${encodeURIComponent(documentId)}`, {
+    method: "DELETE",
+    headers: getHeaders(),
+  });
   await throwForError(res);
   return res.json();
 }

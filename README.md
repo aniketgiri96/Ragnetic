@@ -10,6 +10,7 @@ teams that want private document chat and search with control over infrastructur
 - Single-command full stack with Docker Compose
 - Authenticated, knowledge-base scoped access control (owner/editor/viewer)
 - Async ingestion pipeline (PDF, TXT, MD, DOCX) with status tracking
+- Document lifecycle management (replace duplicate filename uploads, list, rename, delete)
 - Hybrid retrieval (dense + BM25 + RRF) with optional cross-encoder reranking
 - RAG chat responses with source snippets and session history
 - Local-first LLM support via Ollama with optional OpenAI fallback
