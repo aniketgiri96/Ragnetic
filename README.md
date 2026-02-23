@@ -2,65 +2,60 @@
 
 **Open-Source RAG Knowledge Base Platform**
 
-Ragnetic is a self-hosted Retrieval-Augmented Generation (RAG) platform for
-teams that want private document chat and search with control over infrastructure.
+Ragnetic is a self-hosted Retrieval-Augmented Generation (RAG) platform for teams that want private document chat and search with full control over infrastructure and data.
 
 ## Features
 
-- Single-command full stack with Docker Compose
-- Authenticated, knowledge-base scoped access control (owner/editor/viewer)
-- Async ingestion pipeline (PDF, TXT, MD, DOCX) with status tracking
-- Document lifecycle management (replace duplicate filename uploads, list, rename, delete)
-- Hybrid retrieval (dense + BM25 + RRF) with optional cross-encoder reranking
-- RAG chat responses with source snippets and session history
-- Local-first LLM support via Ollama with optional OpenAI fallback
+- **Single-command full stack** — Docker Compose for backend, frontend, and all dependencies
+- **Access control** — Authenticated, knowledge-base–scoped roles (owner / editor / viewer)
+- **Async ingestion** — PDF, TXT, MD, DOCX with status tracking and duplicate-filename handling
+- **Document lifecycle** — List, rename, delete, replace-on-reupload per knowledge base
+- **Hybrid retrieval** — Dense vectors + BM25 + RRF, with optional cross-encoder reranking
+- **RAG chat** — Answers with source snippets, citations, and session history; sync, streaming, and async long-response modes
+- **Local-first LLM** — Ollama by default with optional OpenAI fallback
 
 ## Quickstart
 
 ### Prerequisites
 
-- Docker and Docker Compose plugin
+- Docker and Docker Compose
 
 ### Run locally
 
-1. Clone:
+1. **Clone and start services**
    ```bash
    git clone https://github.com/ragnetic/ragnetic.git
    cd ragnetic
-   ```
-2. Start services:
-   ```bash
    docker compose up -d
    ```
-3. Optional: pull a local Ollama model for chat:
-   ```bash
-   docker exec -it ragnetic-ollama ollama run llama3.2
-   ```
-4. Open:
-   - Dashboard: [http://localhost:3000](http://localhost:3000)
-   - API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
-For step-by-step auth/upload/search/chat calls, use
-[Auth and first query](docs/guides/auth-and-first-query.md).
+2. **Optional: pull a local model for chat**
+   ```bash
+   docker compose exec ollama ollama run llama3.2
+   ```
+
+3. **Open**
+   - **Dashboard:** [http://localhost:3000](http://localhost:3000)
+   - **API docs:** [http://localhost:8000/docs](http://localhost:8000/docs)
+   - **Celery Flower:** [http://localhost:5555](http://localhost:5555)
+
+For step-by-step auth, upload, search, and chat, see [Auth and first query](docs/guides/auth-and-first-query.md).
 
 ## Architecture
 
-See [Visual architecture](docs/architecture/diagram.md) and
-[Technical stack](docs/architecture/tech-stack.md).
+See [Visual architecture](docs/architecture/diagram.md) and [Technical stack](docs/architecture/tech-stack.md).
 
-Core stack:
+| Layer        | Technology                          |
+|-------------|-------------------------------------|
+| Frontend    | Next.js, React, Tailwind CSS v4     |
+| Backend     | Python 3.11+, FastAPI, Celery       |
+| Data        | PostgreSQL, Qdrant, Redis, MinIO    |
+| LLM         | Ollama (default), OpenAI fallback   |
 
-- Frontend: Next.js + React + Tailwind CSS
-- Backend: Python 3.11+, FastAPI, Celery
-- Data: PostgreSQL, Qdrant, Redis, MinIO
-- LLM: Ollama (default), OpenAI fallback
+## Contributing and community
 
-## Contributing and Community
-
-- Contribution guide: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Code of Conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
-- Security policy: [SECURITY.md](SECURITY.md)
-- Support channels: [SUPPORT.md](SUPPORT.md)
+- [Contributing](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
 
 ## Documentation
 
