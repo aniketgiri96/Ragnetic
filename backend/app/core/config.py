@@ -33,19 +33,40 @@ class Settings(BaseSettings):
 
     chunk_max_chars: int = 600
     chunk_overlap_chars: int = 80
+    chunk_overlap_sentences: int = 1
     chunk_min_chars: int = 180
 
     chat_context_max_sources: int = 4
     chat_context_max_chars_per_source: int = 420
     chat_unique_sources_per_document: bool = True
+    chat_model_context_tokens: int = 8192
+    chat_context_budget_ratio: float = 0.75
+    chat_context_reserved_tokens: int = 1200
+    chat_context_min_tokens_per_source: int = 80
+    chat_context_max_tokens_per_source: int = 260
+    chat_context_compression_enabled: bool = True
+    chat_context_compression_target_ratio: float = 0.60
     chat_low_confidence_threshold: float = 0.45
     chat_enforce_citation_format: bool = True
+    chat_enable_faithfulness_scoring: bool = True
+    chat_faithfulness_threshold: float = 0.55
 
     retrieval_top_k: int = 5
     retrieval_dense_limit: int = 20
     retrieval_sparse_pool: int = 240
     retrieval_rerank_top_n: int = 8
     retrieval_enable_cross_encoder: bool = False
+    retrieval_enable_query_expansion: bool = True
+    retrieval_query_expansion_max_variants: int = 4
+    retrieval_enable_hyde: bool = False
+    retrieval_hyde_max_chars: int = 700
+
+    analytics_default_window_days: int = 7
+    analytics_top_queries_limit: int = 8
+    analytics_drift_zero_result_rate_threshold: float = 0.30
+    analytics_drift_retrieval_ms_threshold: int = 1400
+    analytics_drift_low_faithfulness_rate_threshold: float = 0.30
+    analytics_drift_low_confidence_rate_threshold: float = 0.35
     environment: str = "development"
 
     @property

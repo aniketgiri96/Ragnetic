@@ -2,7 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { chat, chatStream, deleteChatSession, getChatJob, getChatSession, listChatSessions, listKb } from "../../lib/api.js";
+import {
+  chat,
+  chatStream,
+  deleteChatSession,
+  getChatJob,
+  getChatSession,
+  listChatSessions,
+  listKb,
+  submitChatFeedback,
+} from "../../lib/api.js";
 
 const inputClass = "fut-input";
 const labelClass = "fut-label";
@@ -171,7 +180,11 @@ export default function ChatPage() {
             status_text: "",
             low_confidence: false,
             confidence_score: null,
+            low_faithfulness: false,
+            faithfulness_score: null,
             citation_enforced: false,
+            feedback_rating: row.feedback_rating || null,
+            feedback_pending: false,
           })),
         );
         setActiveSessionId(sessionId);
@@ -278,7 +291,11 @@ export default function ChatPage() {
                 status_text: "",
                 low_confidence: false,
                 confidence_score: null,
+                low_faithfulness: false,
+                faithfulness_score: null,
                 citation_enforced: false,
+                feedback_rating: row.feedback_rating || null,
+                feedback_pending: false,
               })),
             );
           } catch (err) {
@@ -414,7 +431,11 @@ export default function ChatPage() {
         status_text: "",
         low_confidence: false,
         confidence_score: null,
+        low_faithfulness: false,
+        faithfulness_score: null,
         citation_enforced: false,
+        feedback_rating: null,
+        feedback_pending: false,
       },
       {
         id: assistantId,
@@ -426,7 +447,11 @@ export default function ChatPage() {
         status_text: "",
         low_confidence: false,
         confidence_score: null,
+        low_faithfulness: false,
+        faithfulness_score: null,
         citation_enforced: false,
+        feedback_rating: null,
+        feedback_pending: false,
       },
     ]);
     setLoading(true);
@@ -487,14 +512,20 @@ export default function ChatPage() {
               else if (job.status === "failed") appendTrace("fallback", "Background generation failed.");
             }
             if (job.status === "completed") {
+              const resolvedAssistantId = Number.isInteger(job.assistant_message_id) ? job.assistant_message_id : assistantId;
               patchAssistant({
+                id: resolvedAssistantId,
                 content: job.answer || "(No answer generated)",
                 sources: Array.isArray(job.sources) ? job.sources : [],
                 created_at: new Date().toISOString(),
                 status_text: "",
                 low_confidence: Boolean(job.low_confidence),
                 confidence_score: Number.isFinite(job.confidence_score) ? job.confidence_score : null,
+                low_faithfulness: Boolean(job.low_faithfulness),
+                faithfulness_score: Number.isFinite(job.faithfulness_score) ? job.faithfulness_score : null,
                 citation_enforced: Boolean(job.citation_enforced),
+                feedback_rating: job.feedback_rating || null,
+                feedback_pending: false,
               });
               break;
             }
@@ -515,14 +546,20 @@ export default function ChatPage() {
             await sleep(1500);
           }
         } else {
+          const resolvedAssistantId = Number.isInteger(res.assistant_message_id) ? res.assistant_message_id : assistantId;
           patchAssistant({
+            id: resolvedAssistantId,
             content: res.answer || "(No answer generated)",
             sources: Array.isArray(res.sources) ? res.sources : [],
             created_at: new Date().toISOString(),
             status_text: "",
             low_confidence: Boolean(res.low_confidence),
             confidence_score: Number.isFinite(res.confidence_score) ? res.confidence_score : null,
+            low_faithfulness: Boolean(res.low_faithfulness),
+            faithfulness_score: Number.isFinite(res.faithfulness_score) ? res.faithfulness_score : null,
             citation_enforced: Boolean(res.citation_enforced),
+            feedback_rating: res.feedback_rating || null,
+            feedback_pending: false,
           });
         }
       } else {
@@ -588,13 +625,18 @@ export default function ChatPage() {
               if (event === "done") {
                 patchAssistant((msg) => ({
                   ...msg,
+                  id: Number.isInteger(payload?.assistant_message_id) ? payload.assistant_message_id : msg.id,
                   content: payload?.answer || msg.content || "(No answer generated)",
                   sources: Array.isArray(payload?.sources) ? payload.sources : [],
                   created_at: new Date().toISOString(),
                   status_text: "",
                   low_confidence: Boolean(payload?.low_confidence),
                   confidence_score: Number.isFinite(payload?.confidence_score) ? payload.confidence_score : null,
+                  low_faithfulness: Boolean(payload?.low_faithfulness),
+                  faithfulness_score: Number.isFinite(payload?.faithfulness_score) ? payload.faithfulness_score : null,
                   citation_enforced: Boolean(payload?.citation_enforced),
+                  feedback_rating: payload?.feedback_rating || null,
+                  feedback_pending: false,
                 }));
                 if (payload?.session_id) {
                   setActiveSessionId(payload.session_id);
@@ -626,9 +668,54 @@ export default function ChatPage() {
         created_at: new Date().toISOString(),
         sources: [],
         status_text: "",
+        feedback_pending: false,
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleMessageFeedback = async (messageId, rating) => {
+    if (!Number.isInteger(messageId)) return;
+    const normalized = String(rating || "").toLowerCase();
+    if (normalized !== "up" && normalized !== "down") return;
+
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === messageId
+          ? {
+              ...msg,
+              feedback_pending: true,
+            }
+          : msg,
+      ),
+    );
+
+    try {
+      const response = await submitChatFeedback({ message_id: messageId, rating: normalized });
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? {
+                ...msg,
+                feedback_rating: response?.rating || normalized,
+                feedback_pending: false,
+              }
+            : msg,
+        ),
+      );
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId
+            ? {
+                ...msg,
+                feedback_pending: false,
+              }
+            : msg,
+        ),
+      );
+      setError(err?.message || "Failed to submit feedback.");
     }
   };
 
@@ -873,6 +960,11 @@ export default function ChatPage() {
                   (m.role === "assistant" && !m.content && latestTrace
                     ? formatReasoningStatus(latestTrace.step, latestTrace.detail)
                     : "");
+                const canFeedback =
+                  m.role === "assistant" &&
+                  Number.isInteger(m.id) &&
+                  !liveStatusText &&
+                  Boolean((m.content || "").trim());
                 return (
                   <li
                     key={m.id || `${m.role}-${i}-${m.created_at || "na"}`}
@@ -902,7 +994,36 @@ export default function ChatPage() {
                             Verify sources before relying on this answer.
                           </p>
                         )}
+                        {m.role === "assistant" && m.low_faithfulness && (
+                          <p className="chatgpt-confidence-warn">
+                            Low faithfulness
+                            {Number.isFinite(m.faithfulness_score) ? ` (${Math.round(m.faithfulness_score * 100)}%)` : ""}.
+                            Some claims may not be fully grounded in retrieved evidence.
+                          </p>
+                        )}
                         <p className="chatgpt-message-body">{m.content}</p>
+                        {canFeedback && (
+                          <div className="chatgpt-feedback-row">
+                            <button
+                              type="button"
+                              className={`chatgpt-feedback-btn ${m.feedback_rating === "up" ? "is-active" : ""}`}
+                              onClick={() => handleMessageFeedback(m.id, "up")}
+                              disabled={Boolean(m.feedback_pending)}
+                              aria-label="Mark answer helpful"
+                            >
+                              Helpful
+                            </button>
+                            <button
+                              type="button"
+                              className={`chatgpt-feedback-btn ${m.feedback_rating === "down" ? "is-active" : ""}`}
+                              onClick={() => handleMessageFeedback(m.id, "down")}
+                              disabled={Boolean(m.feedback_pending)}
+                              aria-label="Mark answer unhelpful"
+                            >
+                              Needs work
+                            </button>
+                          </div>
+                        )}
                         {m.sources?.length > 0 && (
                           <div className="chatgpt-source-box">
                             <p className="chatgpt-source-title">Sources</p>

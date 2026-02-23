@@ -19,6 +19,7 @@ class KnowledgeBaseRole:
     OWNER = "owner"
     EDITOR = "editor"
     VIEWER = "viewer"
+    API_USER = "api_user"
 
 
 class KnowledgeBase(Base):

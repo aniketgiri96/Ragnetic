@@ -71,6 +71,127 @@ Success response:
 ]
 ```
 
+## Organizations and Teams
+
+### `GET /orgs/`
+List organizations the current user belongs to.
+
+Auth: `Authorization: Bearer <token>` required.
+
+### `POST /orgs/`
+Create an organization and assign caller as `owner`.
+
+Auth: `Authorization: Bearer <token>` required.
+
+Request body:
+
+```json
+{
+  "name": "Acme Org",
+  "description": "Primary workspace"
+}
+```
+
+### `POST /orgs/{org_id}/members`
+Add or update an organization member by email.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `admin` or `owner` in the organization.
+
+Request body:
+
+```json
+{
+  "email": "teammate@example.com",
+  "role": "member"
+}
+```
+
+Roles: `owner`, `admin`, `member`.
+
+### `GET /orgs/{org_id}/teams`
+List teams in an organization.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: organization member.
+
+### `POST /orgs/{org_id}/teams`
+Create a team in an organization.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `admin` or `owner` in the organization.
+
+### `POST /teams/{team_id}/members`
+Add or update a team member by email.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `admin` or `owner` in the parent organization.
+
+Request body:
+
+```json
+{
+  "email": "member@example.com",
+  "role": "member"
+}
+```
+
+Roles: `manager`, `member`.
+
+### `POST /teams/{team_id}/knowledge-bases/{kb_id}`
+Assign team access to a knowledge base with a KB role.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission:
+- `admin` or `owner` in the team's organization
+- `owner` on the target knowledge base
+
+Request body:
+
+```json
+{
+  "role": "viewer"
+}
+```
+
+KB roles: `owner`, `editor`, `viewer`, `api_user`.
+
+### `GET /kb/{kb_id}/teams`
+List team access mappings for a knowledge base.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `viewer` or higher on the KB.
+
+## Onboarding
+
+### `GET /onboarding/status`
+Get first-time setup progress for the authenticated user.
+
+Auth: `Authorization: Bearer <token>` required.
+
+Response includes:
+- `progress_percent`
+- `completed_steps` / `total_steps`
+- `steps[]` with completion state and recommended action path
+- primary KB and document/query counts
+
+### `POST /onboarding/sample-kb`
+Create a starter knowledge base and queue ingestion of a sample onboarding document.
+
+Auth: `Authorization: Bearer <token>` required.
+
+Success response:
+
+```json
+{
+  "kb_id": 12,
+  "kb_name": "KnowAI Starter KB",
+  "document_id": 44,
+  "ingestion_job_id": 99,
+  "status": "queued"
+}
+```
+
 ### `POST /kb/`
 Create a new knowledge base and assign the caller as `owner`.
 
@@ -106,6 +227,26 @@ Delete a knowledge base and its indexed content.
 Auth: `Authorization: Bearer <token>` required.  
 Permission: `owner` on the KB.
 
+### `GET /kb/{kb_id}/embeddings`
+Get embedding namespace registry for a KB (active version, migration state, version history).
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `owner` on the KB.
+
+### `POST /kb/{kb_id}/embeddings/migrate`
+Start zero-downtime embedding namespace migration to a target version.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `owner` on the KB.
+
+Request body:
+
+```json
+{
+  "target_version": "v2"
+}
+```
+
 ### `GET /kb/{kb_id}/audit`
 List audit events for a KB (uploads, membership changes, KB updates, chat actions, etc.).
 
@@ -115,6 +256,22 @@ Permission: `owner` on the KB.
 Query params:
 - `limit` (optional, default `100`, max `500`)
 - `action` (optional): exact action string filter
+
+### `GET /kb/{kb_id}/analytics`
+Get RAG observability metrics and drift alerts for a knowledge base.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `owner` on the KB.
+
+Query params:
+- `days` (optional, default `7`, min `1`, max `90`)
+
+Response includes:
+- Query volume metrics (total queries, mode breakdown, zero-result rate)
+- Retrieval latency (`avg_retrieval_ms`, `p95_retrieval_ms`)
+- Quality metrics (confidence/faithfulness rates and context proxies)
+- Feedback metrics (thumbs-up/down, helpful rate)
+- Top queries, zero-result queries, daily rollups, and drift alerts
 
 ## KB Members (Sharing / RBAC)
 
@@ -153,6 +310,8 @@ Request body:
 }
 ```
 
+Roles: `owner`, `editor`, `viewer`, `api_user`.
+
 ### `PATCH /kb/{kb_id}/members/{member_user_id}`
 Update an existing member role.
 
@@ -185,6 +344,7 @@ Rate limit: 30 requests/minute per user+IP.
 
 Query params:
 - `kb_id` (optional): target knowledge base ID
+- `replace_existing` (optional, default `true`): replace and re-index when filename already exists with different content
 
 Form-data:
 - `file`: PDF, TXT, MD, or DOCX
@@ -195,7 +355,8 @@ Success response:
 {
   "filename": "employee-handbook.pdf",
   "status": "queued",
-  "document_id": 12
+  "document_id": 12,
+  "ingestion_job_id": 91
 }
 ```
 
@@ -206,20 +367,34 @@ If identical content already exists in the same knowledge base, upload returns t
   "filename": "employee-handbook.pdf",
   "status": "queued",
   "document_id": 12,
+  "ingestion_job_id": 91,
   "deduplicated": true,
   "message": "Identical content already queued/indexed in this knowledge base."
 }
 ```
 
-If same filename already exists in the KB (case-insensitive), upload is blocked and returns the existing `document_id`:
+If same filename already exists in the KB (case-insensitive) and content differs, upload can replace existing content:
+
+```json
+{
+  "filename": "employee-handbook.pdf",
+  "status": "queued",
+  "document_id": 12,
+  "ingestion_job_id": 92,
+  "replaced": true,
+  "message": "Existing document replaced and re-indexing queued."
+}
+```
+
+If same filename exists and replacement is disabled (`replace_existing=false`), upload is blocked:
 
 ```json
 {
   "filename": "employee-handbook.pdf",
   "status": "exists",
   "document_id": 12,
-  "replace_required": false,
-  "message": "Filename already exists in this knowledge base (case-insensitive). Upload blocked. Rename or delete the existing document first."
+  "replace_required": true,
+  "message": "Filename already exists in this knowledge base (case-insensitive). Set replace_existing=true to replace and re-index, or rename/delete the existing document first."
 }
 ```
 
@@ -300,6 +475,39 @@ Retry ingestion for a document (useful for `failed` documents).
 Auth: `Authorization: Bearer <token>` required.  
 Permission: `editor` or higher on the KB.
 
+Success response includes `ingestion_job_id` for the queued retry.
+
+### `GET /kb/{kb_id}/ingestion/dead-letter`
+List ingestion dead-letter entries for a KB.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `editor` or higher on the KB.
+
+Query params:
+- `limit` (optional, default `100`, max `500`)
+- `resolved` (optional, default `false`)
+
+### `POST /ingestion/dead-letter/{dead_letter_id}/retry`
+Queue a retry for a dead-letter ingestion entry.
+
+Auth: `Authorization: Bearer <token>` required.
+
+### `GET /kb/{kb_id}/connectors/sync-state`
+Get incremental sync cursor state for a connector scope.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `editor` or higher on the KB.
+
+Query params:
+- `source_type` (required)
+- `scope_key` (required)
+
+### `POST /kb/{kb_id}/connectors/sync-state`
+Upsert incremental sync cursor state for a connector scope.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `editor` or higher on the KB.
+
 ## Retrieval
 
 ### `GET /search/`
@@ -356,8 +564,11 @@ Success response:
 {
   "answer": "...",
   "session_id": "b4ce5b2fca0147ff8b952f5f703d1a1a",
+  "assistant_message_id": 441,
   "confidence_score": 0.71,
   "low_confidence": false,
+  "faithfulness_score": 0.82,
+  "low_faithfulness": false,
   "citation_enforced": true,
   "sources": [
     {
@@ -400,7 +611,24 @@ Event stream:
 - `event: heartbeat` with progress telemetry (`elapsed_ms`, token count while generating)
 - `event: token` with incremental `delta`
 - `event: error` when generation errors occur
-- `event: done` with final `{ answer, sources, session_id, fallback, confidence_score, low_confidence, citation_enforced }`
+- `event: done` with final `{ answer, sources, session_id, assistant_message_id, fallback, confidence_score, low_confidence, faithfulness_score, low_faithfulness, citation_enforced }`
+
+### `POST /chat/feedback`
+Submit thumbs-up/down feedback for an assistant response message.
+
+Auth: `Authorization: Bearer <token>` required.
+
+Request body:
+
+```json
+{
+  "message_id": 441,
+  "rating": "up",
+  "comment": "Accurate and complete."
+}
+```
+
+`rating` must be `up` or `down`.
 
 ## Chat Sessions
 
@@ -419,6 +647,13 @@ Auth: `Authorization: Bearer <token>` required.
 
 Query params:
 - `limit` (optional, default `100`, max `500`): number of latest messages returned
+
+Each message includes:
+- `id`
+- `role`
+- `content`
+- `created_at`
+- `feedback_rating` (`up` / `down` / `null`)
 
 ### `DELETE /chat/sessions/{session_id}`
 Delete a chat session and its messages.
@@ -441,8 +676,12 @@ Success response:
   "session_id": "optional-session-id",
   "answer": "...",
   "sources": [],
+  "assistant_message_id": 441,
+  "feedback_rating": "up",
   "confidence_score": 0.67,
   "low_confidence": false,
+  "faithfulness_score": 0.79,
+  "low_faithfulness": false,
   "citation_enforced": true,
   "error_message": null,
   "created_at": "2026-02-22T10:10:10.000000",

@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { listKb } from "../../lib/api.js";
+import { getKbAnalytics, listKb } from "../../lib/api.js";
 
 export default function DashboardPage() {
   const [kbs, setKbs] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsKbName, setAnalyticsKbName] = useState("");
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -44,6 +47,61 @@ export default function DashboardPage() {
     return "Review access";
   }, [kbs.length, loading, roleCounts.owner]);
 
+  useEffect(() => {
+    let canceled = false;
+    async function loadAnalytics() {
+      if (!Array.isArray(kbs) || kbs.length === 0) {
+        setAnalytics(null);
+        setAnalyticsKbName("");
+        return;
+      }
+      const target = kbs[0];
+      setAnalyticsLoading(true);
+      try {
+        const data = await getKbAnalytics(target.id, { days: 7 });
+        if (canceled) return;
+        setAnalytics(data || null);
+        setAnalyticsKbName(target.name || `KB #${target.id}`);
+      } catch {
+        if (canceled) return;
+        setAnalytics(null);
+        setAnalyticsKbName(target.name || `KB #${target.id}`);
+      } finally {
+        if (!canceled) setAnalyticsLoading(false);
+      }
+    }
+    loadAnalytics();
+    return () => {
+      canceled = true;
+    };
+  }, [kbs]);
+
+  const ragQueryTotal = useMemo(() => {
+    if (!analytics) return null;
+    return Number.isFinite(analytics?.query_volume?.total) ? analytics.query_volume.total : 0;
+  }, [analytics]);
+
+  const zeroResultRate = useMemo(() => {
+    if (!analytics) return null;
+    const val = analytics?.query_volume?.zero_result_rate;
+    if (!Number.isFinite(val)) return 0;
+    return `${Math.round(val * 100)}%`;
+  }, [analytics]);
+
+  const avgRetrievalMs = useMemo(() => {
+    if (!analytics) return null;
+    const ms = analytics?.latency?.avg_retrieval_ms;
+    if (!Number.isFinite(ms)) return "n/a";
+    return `${Math.round(ms)}ms`;
+  }, [analytics]);
+
+  const helpfulRate = useMemo(() => {
+    if (!analytics) return null;
+    const val = analytics?.feedback?.helpful_rate;
+    if (!Number.isFinite(val)) return "n/a";
+    return `${Math.round(val * 100)}%`;
+  }, [analytics]);
+
   return (
     <div className="dash-clean space-y-5">
       <section className="dash-clean-hero">
@@ -53,6 +111,9 @@ export default function DashboardPage() {
           <p className="page-subtitle">A cleaner command view for ingestion, retrieval, chat, and permissions.</p>
         </div>
         <div className="dash-clean-actions">
+          <a href="/onboarding" className="fut-btn-ghost">
+            Onboarding
+          </a>
           <a href="/chat" className="fut-btn">
             Open chat
           </a>
@@ -95,6 +156,29 @@ export default function DashboardPage() {
         <article className="dash-clean-metric">
           <p className="dash-clean-metric-label">Readiness</p>
           <p className="dash-clean-metric-value">{readiness}</p>
+        </article>
+      </section>
+
+      <section className="dash-clean-metrics" aria-label="RAG analytics">
+        <article className="dash-clean-metric">
+          <p className="dash-clean-metric-label">RAG queries (7d)</p>
+          <p className="dash-clean-metric-value">{analyticsLoading ? "--" : ragQueryTotal ?? "n/a"}</p>
+          <small>{analyticsKbName || "No KB selected"}</small>
+        </article>
+        <article className="dash-clean-metric">
+          <p className="dash-clean-metric-label">Zero-result rate</p>
+          <p className="dash-clean-metric-value">{analyticsLoading ? "--" : zeroResultRate ?? "n/a"}</p>
+          <small>Search + chat retrieval misses</small>
+        </article>
+        <article className="dash-clean-metric">
+          <p className="dash-clean-metric-label">Avg retrieval</p>
+          <p className="dash-clean-metric-value">{analyticsLoading ? "--" : avgRetrievalMs ?? "n/a"}</p>
+          <small>Measured from query telemetry</small>
+        </article>
+        <article className="dash-clean-metric">
+          <p className="dash-clean-metric-label">Helpful feedback</p>
+          <p className="dash-clean-metric-value">{analyticsLoading ? "--" : helpfulRate ?? "n/a"}</p>
+          <small>Thumbs-up ratio</small>
         </article>
       </section>
 

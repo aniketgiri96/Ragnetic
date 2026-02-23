@@ -7,11 +7,14 @@ Ragnetic is a self-hosted Retrieval-Augmented Generation (RAG) platform for team
 ## Features
 
 - **Single-command full stack** — Docker Compose for backend, frontend, and all dependencies
-- **Access control** — Authenticated, knowledge-base–scoped roles (owner / editor / viewer)
+- **Access control** — Organization/team hierarchy with KB-scoped roles (owner / editor / viewer / api_user)
 - **Async ingestion** — PDF, TXT, MD, DOCX with status tracking and duplicate-filename handling
+- **Ingestion reliability** — Job tracking, dead-letter queue listing, and retry endpoints
 - **Document lifecycle** — List, rename, delete, replace-on-reupload per knowledge base
 - **Hybrid retrieval** — Dense vectors + BM25 + RRF, with optional cross-encoder reranking
 - **RAG chat** — Answers with source snippets, citations, and session history; sync, streaming, and async long-response modes
+- **Guided onboarding** — Setup wizard with progress tracking and one-click starter knowledge base
+- **Observability** — KB analytics dashboard with drift alerts and per-answer thumbs feedback
 - **Local-first LLM** — Ollama by default with optional OpenAI fallback
 
 ## Quickstart

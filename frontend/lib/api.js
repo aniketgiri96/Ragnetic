@@ -44,6 +44,21 @@ export async function listKb() {
   return res.json();
 }
 
+export async function getOnboardingStatus() {
+  const res = await fetch(`${API}/onboarding/status`, { headers: getHeaders() });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function createOnboardingSampleKb() {
+  const res = await fetch(`${API}/onboarding/sample-kb`, {
+    method: "POST",
+    headers: getHeaders(),
+  });
+  await throwForError(res);
+  return res.json();
+}
+
 export async function createKb(body) {
   const res = await fetch(`${API}/kb/`, {
     method: "POST",
@@ -89,6 +104,15 @@ export async function listKbAuditLogs(kbId, { limit = 100, action } = {}) {
   return res.json();
 }
 
+export async function getKbAnalytics(kbId, { days } = {}) {
+  const params = new URLSearchParams();
+  if (days != null) params.set("days", String(days));
+  const suffix = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API}/kb/${encodeURIComponent(kbId)}/analytics${suffix}`, { headers: getHeaders() });
+  await throwForError(res);
+  return res.json();
+}
+
 export async function uploadFile(file, kbId) {
   const form = new FormData();
   form.append("file", file);
@@ -120,6 +144,20 @@ export async function chat(body) {
       kb_id: body.kb_id ?? undefined,
       session_id: body.session_id ?? undefined,
       async_mode: body.async_mode ?? undefined,
+    }),
+  });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function submitChatFeedback(body) {
+  const res = await fetch(`${API}/chat/feedback`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({
+      message_id: body.message_id,
+      rating: body.rating,
+      comment: body.comment ?? undefined,
     }),
   });
   await throwForError(res);
