@@ -1342,11 +1342,11 @@ def get_onboarding_status(user: User) -> dict[str, Any]:
 
 
 def create_onboarding_sample_kb(user: User) -> dict[str, Any]:
-    sample_kb_name = "KnowAI Starter KB"
+    sample_kb_name = "Ragnatic Starter KB"
     sample_kb_description = "Preloaded starter knowledge base for first-time onboarding."
-    sample_filename = "knowai-starter-guide.md"
+    sample_filename = "Ragnatic-starter-guide.md"
     sample_text = (
-        "# KnowAI Starter Guide\n\n"
+        "# Ragnatic Starter Guide\n\n"
         "## Welcome\n"
         "This starter knowledge base helps you run your first grounded query quickly.\n\n"
         "## Suggested Questions\n"

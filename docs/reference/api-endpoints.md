@@ -185,7 +185,7 @@ Success response:
 ```json
 {
   "kb_id": 12,
-  "kb_name": "KnowAI Starter KB",
+  "kb_name": "Ragnatic Starter KB",
   "document_id": 44,
   "ingestion_job_id": 99,
   "status": "queued"

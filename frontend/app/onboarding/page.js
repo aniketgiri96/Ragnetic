@@ -47,7 +47,7 @@ export default function OnboardingPage() {
     setMessage("");
     try {
       const res = await createOnboardingSampleKb();
-      setMessage(`Sample KB queued: ${res?.kb_name || "KnowAI Starter KB"}.`);
+      setMessage(`Sample KB queued: ${res?.kb_name || "Ragnatic Starter KB"}.`);
       await load();
     } catch (err) {
       setError(err?.message || "Failed to create sample KB.");
