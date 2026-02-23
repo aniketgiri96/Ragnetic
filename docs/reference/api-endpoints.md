@@ -71,6 +71,51 @@ Success response:
 ]
 ```
 
+### `POST /kb/`
+Create a new knowledge base and assign the caller as `owner`.
+
+Auth: `Authorization: Bearer <token>` required.
+
+Request body:
+
+```json
+{
+  "name": "Ops KB",
+  "description": "Runbooks and procedures"
+}
+```
+
+### `PATCH /kb/{kb_id}`
+Update KB name and/or description.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `owner` on the KB.
+
+Request body (provide either or both fields):
+
+```json
+{
+  "name": "Ops KB v2",
+  "description": "Updated scope"
+}
+```
+
+### `DELETE /kb/{kb_id}`
+Delete a knowledge base and its indexed content.
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `owner` on the KB.
+
+### `GET /kb/{kb_id}/audit`
+List audit events for a KB (uploads, membership changes, KB updates, chat actions, etc.).
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `owner` on the KB.
+
+Query params:
+- `limit` (optional, default `100`, max `500`)
+- `action` (optional): exact action string filter
+
 ## KB Members (Sharing / RBAC)
 
 ### `GET /kb/{kb_id}/members`
@@ -140,7 +185,6 @@ Rate limit: 30 requests/minute per user+IP.
 
 Query params:
 - `kb_id` (optional): target knowledge base ID
-- `replace_existing` (optional, default `true`): if `true`, uploading a file with the same filename in the same KB replaces the existing document and re-indexes it
 
 Form-data:
 - `file`: PDF, TXT, MD, or DOCX
@@ -167,27 +211,15 @@ If identical content already exists in the same knowledge base, upload returns t
 }
 ```
 
-If same filename exists and `replace_existing=true`, upload replaces that document (same `document_id`) and re-indexes:
-
-```json
-{
-  "filename": "employee-handbook.pdf",
-  "status": "queued",
-  "document_id": 12,
-  "replaced": true,
-  "message": "Existing file replaced and re-indexing started."
-}
-```
-
-If same filename exists and `replace_existing=false`, server returns:
+If same filename already exists in the KB (case-insensitive), upload is blocked and returns the existing `document_id`:
 
 ```json
 {
   "filename": "employee-handbook.pdf",
   "status": "exists",
   "document_id": 12,
-  "replace_required": true,
-  "message": "File already exists in this knowledge base. Set replace_existing=true to replace it."
+  "replace_required": false,
+  "message": "Filename already exists in this knowledge base (case-insensitive). Upload blocked. Rename or delete the existing document first."
 }
 ```
 
@@ -262,6 +294,12 @@ Behavior:
 - Deletes stored file object
 - Removes document record from PostgreSQL
 
+### `POST /documents/{document_id}/retry`
+Retry ingestion for a document (useful for `failed` documents).
+
+Auth: `Authorization: Bearer <token>` required.  
+Permission: `editor` or higher on the KB.
+
 ## Retrieval
 
 ### `GET /search/`
@@ -318,6 +356,9 @@ Success response:
 {
   "answer": "...",
   "session_id": "b4ce5b2fca0147ff8b952f5f703d1a1a",
+  "confidence_score": 0.71,
+  "low_confidence": false,
+  "citation_enforced": true,
   "sources": [
     {
       "snippet": "...",
@@ -359,7 +400,7 @@ Event stream:
 - `event: heartbeat` with progress telemetry (`elapsed_ms`, token count while generating)
 - `event: token` with incremental `delta`
 - `event: error` when generation errors occur
-- `event: done` with final `{ answer, sources, session_id, fallback }`
+- `event: done` with final `{ answer, sources, session_id, fallback, confidence_score, low_confidence, citation_enforced }`
 
 ## Chat Sessions
 
@@ -400,6 +441,9 @@ Success response:
   "session_id": "optional-session-id",
   "answer": "...",
   "sources": [],
+  "confidence_score": 0.67,
+  "low_confidence": false,
+  "citation_enforced": true,
   "error_message": null,
   "created_at": "2026-02-22T10:10:10.000000",
   "started_at": "2026-02-22T10:10:11.000000",

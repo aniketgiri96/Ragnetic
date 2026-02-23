@@ -24,7 +24,7 @@ docker compose up -d
 2. **List knowledge bases:** `GET http://localhost:8000/kb/` with `Authorization: Bearer <token>`.
    - On first register/login, Ragnetic creates a personal KB for that user and grants `owner` role.
 3. **Upload a document:** `POST http://localhost:8000/upload/` with bearer token and a file (e.g. PDF, TXT, MD). Optionally pass `?kb_id=1`.
-   - Duplicate filename behavior: `replace_existing=true` (default) replaces existing file and re-indexes.
+   - Duplicate filename behavior: filenames are unique per knowledge base (case-insensitive). If a filename already exists, upload is blocked.
 4. **Check ingestion:** `GET http://localhost:8000/documents/{document_id}/status` with bearer token — wait until `status` is `indexed`.
 5. **Manage uploaded docs:** `GET /documents?kb_id=1`, `PATCH /documents/{document_id}` (rename), `DELETE /documents/{document_id}`.
 6. **Search:** `GET http://localhost:8000/search/?query=your+query&kb_id=1` with bearer token.

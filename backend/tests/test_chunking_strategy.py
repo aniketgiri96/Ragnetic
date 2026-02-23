@@ -34,3 +34,16 @@ def test_chunk_text_splits_very_long_paragraph():
     )
     assert len(chunks) > 1
     assert all(c.text.strip() for c in chunks)
+
+
+def test_chunk_text_deduplicates_identical_chunks():
+    text = "Alpha beta gamma.\n\nAlpha beta gamma.\n\nAlpha beta gamma."
+    chunks = chunk_text(
+        text,
+        max_chunk_chars=20,
+        overlap_chars=0,
+        min_chunk_chars=5,
+        metadata_base={"source": "dup.txt", "doc_id": 1},
+    )
+    assert len(chunks) == 1
+    assert chunks[0].metadata["chunk_count"] == 1

@@ -10,6 +10,7 @@ from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.models.base import SessionLocal
 from app.models.chat import ChatJob, ChatJobStatus, ChatMessage, ChatRole, ChatSession
+from app.services.citations import append_citation_legend, enforce_citation_format
 from app.services.llm import generate as llm_generate
 from app.services.retrieval import hybrid_retrieve
 
@@ -45,8 +46,37 @@ def _get_or_create_chat_session(db, user_id: int, kb_id: int, session_id: str) -
 
 
 def _retrieve_for_chat(kb_id: int, query: str, limit: int) -> list[dict]:
-    rows = hybrid_retrieve(kb_id=kb_id, query=query, top_k=limit)
-    return [{"snippet": r.get("snippet", ""), "metadata": r.get("metadata", {}), "score": r.get("score", 0.0)} for r in rows]
+    retrieval_limit = max(limit, limit * 3) if settings.chat_unique_sources_per_document else limit
+    rows = hybrid_retrieve(kb_id=kb_id, query=query, top_k=retrieval_limit)
+    mapped = [{"snippet": r.get("snippet", ""), "metadata": r.get("metadata", {}), "score": r.get("score", 0.0)} for r in rows]
+    return _dedupe_sources_for_chat(mapped, limit=limit)
+
+
+def _source_identity(source: dict, index: int) -> str:
+    metadata = source.get("metadata") or {}
+    doc_id = metadata.get("doc_id")
+    if doc_id is not None:
+        return f"doc:{doc_id}"
+    name = metadata.get("source") or metadata.get("filename") or metadata.get("title")
+    if isinstance(name, str) and name.strip():
+        return f"name:{name.strip().lower()}"
+    return f"idx:{index}"
+
+
+def _dedupe_sources_for_chat(sources: list[dict], limit: int) -> list[dict]:
+    if not settings.chat_unique_sources_per_document:
+        return sources[:limit]
+    deduped: list[dict] = []
+    seen: set[str] = set()
+    for idx, source in enumerate(sources):
+        key = _source_identity(source, idx)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(source)
+        if len(deduped) >= limit:
+            break
+    return deduped
 
 
 def _fallback_answer_from_sources(sources: list[dict], detail: str) -> str:
@@ -65,6 +95,18 @@ def _fallback_answer_from_sources(sources: list[dict], detail: str) -> str:
         f"LLM unavailable ({detail}). I could not generate a model answer. "
         "Top retrieved excerpts:\n" + "\n".join(preview_lines)
     )
+
+
+def _enforce_citation_format(answer: str, sources: list[dict]) -> str:
+    return enforce_citation_format(
+        answer,
+        sources,
+        enabled=settings.chat_enforce_citation_format,
+    )
+
+
+def _append_citation_legend(answer: str, sources: list[dict]) -> str:
+    return append_citation_legend(answer, sources, legend_header="Source references")
 
 
 @celery_app.task(bind=True)
@@ -99,10 +141,18 @@ def process_chat_job(self, job_id: str) -> dict:
             answer = "No relevant documents found in the selected knowledge base yet. Upload documents and try again."
         else:
             system = (
-                "Answer only using the provided context blocks for factual claims. "
+                "You are a grounded assistant for this RAG system. "
+                "Use only the provided context blocks for factual claims; never invent details. "
                 "Use conversation history only for continuity. "
-                "If context is insufficient, explicitly say so and do not fabricate facts. "
-                "Mention source numbers when possible."
+                "Answer the user directly from available evidence, regardless of document type "
+                "(for example PRDs, runbooks, policies, specs, tickets, or notes). "
+                "If partial evidence exists, provide what is known and mark missing parts as "
+                "\"Not specified in provided context.\" "
+                "Do not ask for more context unless zero relevant evidence exists. "
+                "Do not say \"I couldn't find\" when at least one relevant fact is available. "
+                "When the question asks for lists (features, phases, requirements, steps, risks), "
+                "respond in a concise structured list. "
+                "For every factual bullet/sentence, append citations in the form [Source N]."
             )
             history_block = f"Conversation history:\n{history}\n\n" if history else ""
             user_prompt = f"{history_block}Context:\n\n{context_blocks}\n\nQuestion: {job.question}"
@@ -112,6 +162,8 @@ def process_chat_job(self, job_id: str) -> dict:
                 detail = str(exc).strip() or exc.__class__.__name__
                 logger.warning("Async chat LLM failed for job_id=%s: %s", job_id, detail)
                 answer = _fallback_answer_from_sources(sources, detail)
+            answer = _enforce_citation_format(answer, sources)
+            answer = _append_citation_legend(answer, sources)
 
         db.add(ChatMessage(session_id=job.session_id, role=ChatRole.ASSISTANT, content=answer))
         session.updated_at = datetime.utcnow()

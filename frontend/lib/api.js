@@ -44,13 +44,57 @@ export async function listKb() {
   return res.json();
 }
 
-export async function uploadFile(file, kbId, { replaceExisting = true } = {}) {
+export async function createKb(body) {
+  const res = await fetch(`${API}/kb/`, {
+    method: "POST",
+    headers: getHeaders(),
+    body: JSON.stringify({
+      name: body?.name ?? "",
+      description: body?.description ?? undefined,
+    }),
+  });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function updateKb(kbId, body) {
+  const payload = {};
+  if (Object.prototype.hasOwnProperty.call(body || {}, "name")) payload.name = body.name;
+  if (Object.prototype.hasOwnProperty.call(body || {}, "description")) payload.description = body.description;
+  const res = await fetch(`${API}/kb/${encodeURIComponent(kbId)}`, {
+    method: "PATCH",
+    headers: getHeaders(),
+    body: JSON.stringify(payload),
+  });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function deleteKb(kbId) {
+  const res = await fetch(`${API}/kb/${encodeURIComponent(kbId)}`, {
+    method: "DELETE",
+    headers: getHeaders(),
+  });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function listKbAuditLogs(kbId, { limit = 100, action } = {}) {
+  const params = new URLSearchParams();
+  params.set("limit", String(limit));
+  if (action) params.set("action", String(action));
+  const url = `${API}/kb/${encodeURIComponent(kbId)}/audit?${params.toString()}`;
+  const res = await fetch(url, { headers: getHeaders() });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function uploadFile(file, kbId) {
   const form = new FormData();
   form.append("file", file);
   const params = new URLSearchParams();
   if (kbId != null) params.set("kb_id", String(kbId));
-  params.set("replace_existing", replaceExisting ? "true" : "false");
-  const url = `${API}/upload/?${params.toString()}`;
+  const url = params.toString() ? `${API}/upload/?${params.toString()}` : `${API}/upload/`;
   const headers = {};
   if (typeof window !== "undefined" && localStorage.getItem("ragnetic_token"))
     headers["Authorization"] = `Bearer ${localStorage.getItem("ragnetic_token")}`;
@@ -158,6 +202,15 @@ export async function renameDocument(documentId, filename) {
     method: "PATCH",
     headers: getHeaders(),
     body: JSON.stringify({ filename }),
+  });
+  await throwForError(res);
+  return res.json();
+}
+
+export async function retryDocumentIngestion(documentId) {
+  const res = await fetch(`${API}/documents/${encodeURIComponent(documentId)}/retry`, {
+    method: "POST",
+    headers: getHeaders(),
   });
   await throwForError(res);
   return res.json();

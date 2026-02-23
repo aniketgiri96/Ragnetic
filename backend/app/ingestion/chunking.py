@@ -162,6 +162,17 @@ def chunk_text(
 
     emit_chunk()
 
+    # Guard against identical repeated chunks from duplicated document sections.
+    deduped: list[Chunk] = []
+    seen_texts: set[str] = set()
+    for chunk in chunks:
+        normalized_text = re.sub(r"\s+", " ", chunk.text).strip().lower()
+        if not normalized_text or normalized_text in seen_texts:
+            continue
+        seen_texts.add(normalized_text)
+        deduped.append(chunk)
+    chunks = deduped
+
     total = len(chunks)
     for i, chunk in enumerate(chunks):
         chunk.metadata["chunk_index"] = i

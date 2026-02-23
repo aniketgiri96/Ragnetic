@@ -56,6 +56,9 @@ If `OPENAI_API_KEY` is set and the OpenAI SDK is installed, chat uses OpenAI (`g
 |----------|---------|---------|
 | `CHAT_CONTEXT_MAX_SOURCES` | `4` | Max retrieved source snippets inserted into prompt |
 | `CHAT_CONTEXT_MAX_CHARS_PER_SOURCE` | `420` | Per-source snippet character limit in prompt |
+| `CHAT_UNIQUE_SOURCES_PER_DOCUMENT` | `true` | Keep at most one retrieved chunk per document in chat context |
+| `CHAT_LOW_CONFIDENCE_THRESHOLD` | `0.45` | Marks chat answer as low-confidence when retrieval quality is below this score |
+| `CHAT_ENFORCE_CITATION_FORMAT` | `true` | Appends `[Source N]` citations when model output omits them |
 
 ## Retrieval settings
 

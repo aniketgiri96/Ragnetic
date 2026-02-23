@@ -16,3 +16,7 @@ def test_normalize_document_filename_rejects_empty():
 def test_normalize_document_filename_rejects_too_long():
     with pytest.raises(HTTPException):
         routes._normalize_document_filename("a" * 513)
+
+
+def test_document_filename_key_is_case_insensitive():
+    assert routes._document_filename_key(" Report.PDF ") == "report.pdf"

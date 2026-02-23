@@ -82,6 +82,33 @@ function reasoningStepLabel(step) {
   return map[step] || "Progress update";
 }
 
+function formatReasoningStatus(step, detail) {
+  const label = reasoningStepLabel(step);
+  const normalizedDetail = String(detail || "").trim();
+  if (!normalizedDetail) return `${label}...`;
+  if (normalizedDetail.toLowerCase().startsWith(label.toLowerCase())) return normalizedDetail;
+  return `${label}: ${normalizedDetail}`;
+}
+
+function reasoningActivityKey(trace, statusText) {
+  const lastStep =
+    Array.isArray(trace) && trace.length > 0
+      ? String(trace[trace.length - 1]?.step || "").toLowerCase()
+      : "";
+  if (lastStep === "queued") return "queued";
+  if (lastStep === "running") return "running";
+  if (lastStep === "retrieve" || lastStep === "evidence") return "searching";
+  if (lastStep === "draft" || lastStep === "understand") return "thinking";
+  if (lastStep === "evolve") return "evolving";
+  if (lastStep === "finalize" || lastStep === "completed") return "finalizing";
+  if (lastStep === "fallback") return "fallback";
+  const status = String(statusText || "").toLowerCase();
+  if (status.includes("queued")) return "queued";
+  if (status.includes("background")) return "running";
+  if (status.includes("writing")) return "evolving";
+  return "thinking";
+}
+
 function sortSessionsByUpdatedDesc(sessions) {
   return [...sessions].sort((a, b) => {
     const bStamp = Date.parse(b.updated_at || b.created_at || "");
@@ -142,6 +169,9 @@ export default function ChatPage() {
             sources: Array.isArray(row.sources) ? row.sources : [],
             trace: [],
             status_text: "",
+            low_confidence: false,
+            confidence_score: null,
+            citation_enforced: false,
           })),
         );
         setActiveSessionId(sessionId);
@@ -246,6 +276,9 @@ export default function ChatPage() {
                 sources: Array.isArray(row.sources) ? row.sources : [],
                 trace: [],
                 status_text: "",
+                low_confidence: false,
+                confidence_score: null,
+                citation_enforced: false,
               })),
             );
           } catch (err) {
@@ -372,7 +405,17 @@ export default function ChatPage() {
     setMessage("");
     setMessages((prev) => [
       ...prev,
-      { role: "user", content: userMsg, created_at: new Date().toISOString(), sources: [], trace: [], status_text: "" },
+      {
+        role: "user",
+        content: userMsg,
+        created_at: new Date().toISOString(),
+        sources: [],
+        trace: [],
+        status_text: "",
+        low_confidence: false,
+        confidence_score: null,
+        citation_enforced: false,
+      },
       {
         id: assistantId,
         role: "assistant",
@@ -381,6 +424,9 @@ export default function ChatPage() {
         sources: [],
         trace: [],
         status_text: "",
+        low_confidence: false,
+        confidence_score: null,
+        citation_enforced: false,
       },
     ]);
     setLoading(true);
@@ -446,6 +492,9 @@ export default function ChatPage() {
                 sources: Array.isArray(job.sources) ? job.sources : [],
                 created_at: new Date().toISOString(),
                 status_text: "",
+                low_confidence: Boolean(job.low_confidence),
+                confidence_score: Number.isFinite(job.confidence_score) ? job.confidence_score : null,
+                citation_enforced: Boolean(job.citation_enforced),
               });
               break;
             }
@@ -471,6 +520,9 @@ export default function ChatPage() {
             sources: Array.isArray(res.sources) ? res.sources : [],
             created_at: new Date().toISOString(),
             status_text: "",
+            low_confidence: Boolean(res.low_confidence),
+            confidence_score: Number.isFinite(res.confidence_score) ? res.confidence_score : null,
+            citation_enforced: Boolean(res.citation_enforced),
           });
         }
       } else {
@@ -495,7 +547,7 @@ export default function ChatPage() {
                 const step = typeof payload?.step === "string" ? payload.step : "progress";
                 const detail = typeof payload?.detail === "string" ? payload.detail : "Working...";
                 appendTrace(step, detail);
-                patchAssistant({ status_text: `${reasoningStepLabel(step)}...` });
+                patchAssistant({ status_text: formatReasoningStatus(step, detail) });
                 return;
               }
               if (event === "sources_preview") {
@@ -506,7 +558,9 @@ export default function ChatPage() {
                       .slice(0, 3)
                   : [];
                 if (sourceNames.length > 0) {
-                  appendTrace("evidence", `Top sources: ${sourceNames.join(", ")}`);
+                  const detail = `Top sources: ${sourceNames.join(", ")}`;
+                  appendTrace("evidence", detail);
+                  patchAssistant({ status_text: formatReasoningStatus("evidence", detail) });
                 }
                 return;
               }
@@ -538,6 +592,9 @@ export default function ChatPage() {
                   sources: Array.isArray(payload?.sources) ? payload.sources : [],
                   created_at: new Date().toISOString(),
                   status_text: "",
+                  low_confidence: Boolean(payload?.low_confidence),
+                  confidence_score: Number.isFinite(payload?.confidence_score) ? payload.confidence_score : null,
+                  citation_enforced: Boolean(payload?.citation_enforced),
                 }));
                 if (payload?.session_id) {
                   setActiveSessionId(payload.session_id);
@@ -807,54 +864,67 @@ export default function ChatPage() {
             </div>
           ) : (
             <ol className="chatgpt-message-list">
-              {messages.map((m, i) => (
-                <li
-                  key={m.id || `${m.role}-${i}-${m.created_at || "na"}`}
-                  className={`chatgpt-message ${m.role === "user" ? "is-user" : "is-assistant"}`}
-                >
-                  <div className={`chatgpt-message-stack ${m.role === "user" ? "is-user" : "is-assistant"}`}>
-                    <div className="chatgpt-avatar">{m.role === "user" ? "You" : "AI"}</div>
-                    <div className="chatgpt-message-content">
-                      <div className={`chatgpt-message-head ${m.role === "user" ? "is-user" : "is-assistant"}`}>
-                        <p>{m.role === "user" ? "You" : "Assistant"}</p>
-                        <span>{m.created_at ? formatRelativeTime(m.created_at) : ""}</span>
+              {messages.map((m, i) => {
+                const activityKey = reasoningActivityKey(m.trace, m.status_text);
+                const latestTrace =
+                  Array.isArray(m.trace) && m.trace.length > 0 ? m.trace[m.trace.length - 1] : null;
+                const liveStatusText =
+                  m.status_text ||
+                  (m.role === "assistant" && !m.content && latestTrace
+                    ? formatReasoningStatus(latestTrace.step, latestTrace.detail)
+                    : "");
+                return (
+                  <li
+                    key={m.id || `${m.role}-${i}-${m.created_at || "na"}`}
+                    className={`chatgpt-message ${m.role === "user" ? "is-user" : "is-assistant"}`}
+                  >
+                    <div className={`chatgpt-message-stack ${m.role === "user" ? "is-user" : "is-assistant"}`}>
+                      <div className="chatgpt-avatar">{m.role === "user" ? "You" : "AI"}</div>
+                      <div className="chatgpt-message-content">
+                        <div className={`chatgpt-message-head ${m.role === "user" ? "is-user" : "is-assistant"}`}>
+                          <p>{m.role === "user" ? "You" : "Assistant"}</p>
+                          <span>{m.created_at ? formatRelativeTime(m.created_at) : ""}</span>
+                        </div>
+                        {m.role === "assistant" && liveStatusText && (
+                          <div className={`chatgpt-status-line is-${activityKey}`}>
+                            <span className="chatgpt-status-text">{liveStatusText}</span>
+                            <span className="chatgpt-status-dots" aria-hidden="true">
+                              <span />
+                              <span />
+                              <span />
+                            </span>
+                          </div>
+                        )}
+                        {m.role === "assistant" && m.low_confidence && (
+                          <p className="chatgpt-confidence-warn">
+                            Low confidence
+                            {Number.isFinite(m.confidence_score) ? ` (${Math.round(m.confidence_score * 100)}%)` : ""}.
+                            Verify sources before relying on this answer.
+                          </p>
+                        )}
+                        <p className="chatgpt-message-body">{m.content}</p>
+                        {m.sources?.length > 0 && (
+                          <div className="chatgpt-source-box">
+                            <p className="chatgpt-source-title">Sources</p>
+                            <ul>
+                              {m.sources.map((s, j) => {
+                                const sourceName = s.metadata?.source || s.metadata?.filename || `Source ${j + 1}`;
+                                const snippet = s.snippet || "";
+                                return (
+                                  <li key={`${sourceName}-${j}`}>
+                                    <span className="chatgpt-source-name">[Source {j + 1}] {sourceName}:</span> {snippet.slice(0, 180)}
+                                    {snippet.length > 180 ? "..." : ""}
+                                  </li>
+                                );
+                              })}
+                            </ul>
+                          </div>
+                        )}
                       </div>
-                      {m.role === "assistant" && m.status_text && <p className="chatgpt-status-line">{m.status_text}</p>}
-                      {m.role === "assistant" && Array.isArray(m.trace) && m.trace.length > 0 && (
-                        <div className="chatgpt-trace-box">
-                          <p className="chatgpt-trace-title">Reasoning trace</p>
-                          <ul className="chatgpt-trace-list">
-                            {m.trace.map((item, idx) => (
-                              <li key={`${item.step}-${item.detail}-${idx}`}>
-                                <span className="chatgpt-trace-step">{reasoningStepLabel(item.step)}</span>
-                                <span className="chatgpt-trace-detail">{item.detail}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      <p className="chatgpt-message-body">{m.content}</p>
-                      {m.sources?.length > 0 && (
-                        <div className="chatgpt-source-box">
-                          <p className="chatgpt-source-title">Sources</p>
-                          <ul>
-                            {m.sources.map((s, j) => {
-                              const sourceName = s.metadata?.source || s.metadata?.filename || `Source ${j + 1}`;
-                              const snippet = s.snippet || "";
-                              return (
-                                <li key={`${sourceName}-${j}`}>
-                                  <span className="chatgpt-source-name">{sourceName}:</span> {snippet.slice(0, 180)}
-                                  {snippet.length > 180 ? "..." : ""}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      )}
                     </div>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ol>
           )}
           <div ref={threadEndRef} />

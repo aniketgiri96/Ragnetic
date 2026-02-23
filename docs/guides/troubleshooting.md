@@ -28,7 +28,11 @@ docker logs ragnetic-celery-worker --tail 200
 
 ## Upload creates duplicates or should replace existing file
 
-Use `replace_existing=true` on `POST /upload/` (default behavior). This reuses the same document record and re-indexes it.
+Filenames are unique per knowledge base (case-insensitive). If a filename already exists, upload is blocked.  
+To change content for that file, either:
+- Rename the existing document first, then upload
+- Delete the existing document, then upload
+- Keep the same document and use `POST /documents/{document_id}/retry` if ingestion failed
 
 If replacement is blocked, check:
 
