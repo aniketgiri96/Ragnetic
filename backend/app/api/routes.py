@@ -61,7 +61,7 @@ from app.services.qdrant_client import delete_all_collections_for_kb, delete_doc
 from app.services.retrieval import hybrid_retrieve
 from app.services.storage import delete_file, upload_file
 from app.tasks.chat import process_chat_job
-from app.tasks.ingestion import ingest_document, migrate_kb_embedding_namespace
+from app.tasks.ingestion import _update_doc_status, ingest_document, migrate_kb_embedding_namespace
 
 VALID_KB_ROLES = {
     KnowledgeBaseRole.OWNER,
