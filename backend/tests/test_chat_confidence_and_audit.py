@@ -11,6 +11,12 @@ def test_chat_quality_signals_empty_sources_low_confidence():
     assert quality["low_confidence"] is True
 
 
+def test_faithfulness_signals_empty_sources_low():
+    out = routes._faithfulness_signals("Any answer", [])
+    assert out["faithfulness_score"] == 0.0
+    assert out["low_faithfulness"] is True
+
+
 def test_enforce_citation_format_appends_when_missing(monkeypatch):
     monkeypatch.setattr(routes.settings, "chat_enforce_citation_format", True)
     out = routes._enforce_citation_format("The policy allows 20 days of PTO.", [{"snippet": "policy", "score": 0.7}])

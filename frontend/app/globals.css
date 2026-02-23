@@ -1248,6 +1248,41 @@
     font-size: 0.92rem;
   }
 
+  .chatgpt-feedback-row {
+    margin-top: 0.45rem;
+    display: flex;
+    gap: 0.42rem;
+    flex-wrap: wrap;
+  }
+
+  .chatgpt-feedback-btn {
+    border: 1px solid #cbd5e1;
+    background: #ffffff;
+    color: #334155;
+    border-radius: 999px;
+    padding: 0.22rem 0.62rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  }
+
+  .chatgpt-feedback-btn:hover:not(:disabled) {
+    border-color: #94a3b8;
+    color: #0f172a;
+  }
+
+  .chatgpt-feedback-btn.is-active {
+    border-color: #0f172a;
+    background: #0f172a;
+    color: #ffffff;
+  }
+
+  .chatgpt-feedback-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
   .chatgpt-source-box {
     margin-top: 0.55rem;
     border-top: 1px solid #e2e8f0;

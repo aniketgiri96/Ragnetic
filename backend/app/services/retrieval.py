@@ -9,6 +9,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.ingestion.embedding import embed_texts
+from app.services.embedding_versions import get_active_embedding_version_for_kb
 from app.services.qdrant_client import ensure_collection, get_qdrant, search_collection
 
 TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
@@ -89,6 +90,23 @@ def _rrf_fuse(dense_rank: dict[str, int], sparse_rank: dict[str, int]) -> dict[s
     return scores
 
 
+def _normalize_query_variants(query: str, query_variants: list[str] | None = None) -> list[str]:
+    """Return de-duplicated retrieval query variants with original query first."""
+    variants = [query, *(query_variants or [])]
+    out: list[str] = []
+    seen: set[str] = set()
+    for variant in variants:
+        normalized = (variant or "").strip()
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(normalized)
+    return out or [query.strip() or query]
+
+
 def _optional_cross_encoder_score(query: str, docs: list[str]) -> list[float] | None:
     """Return cross-encoder scores when dependency is available."""
     if not settings.retrieval_enable_cross_encoder:
@@ -112,8 +130,8 @@ def _query_embedding(query: str) -> tuple[float, ...]:
     return tuple(embed_texts([query])[0])
 
 
-def _dense_search(kb_id: int, query: str, limit: int) -> list[Candidate]:
-    coll = ensure_collection(kb_id)
+def _dense_search(kb_id: int, query: str, limit: int, embedding_version: str) -> list[Candidate]:
+    coll = ensure_collection(kb_id, embedding_version=embedding_version)
     vector = list(_query_embedding(query.strip()))
     hits = search_collection(collection=coll, vector=vector, limit=limit)
     out: list[Candidate] = []
@@ -131,9 +149,9 @@ def _dense_search(kb_id: int, query: str, limit: int) -> list[Candidate]:
     return out
 
 
-def _scroll_candidates(kb_id: int, max_points: int = 800) -> list[Candidate]:
+def _scroll_candidates(kb_id: int, embedding_version: str, max_points: int = 800) -> list[Candidate]:
     """Read a bounded corpus snapshot for sparse retrieval."""
-    coll = ensure_collection(kb_id)
+    coll = ensure_collection(kb_id, embedding_version=embedding_version)
     client = get_qdrant()
     offset = None
     gathered: list[Candidate] = []
@@ -173,42 +191,65 @@ def hybrid_retrieve(
     dense_limit: int | None = None,
     sparse_pool: int | None = None,
     rerank_top_n: int | None = None,
+    query_variants: list[str] | None = None,
+    embedding_version: str | None = None,
 ) -> list[dict[str, Any]]:
     """Hybrid retrieve with dense + BM25 sparse + RRF and optional reranking."""
     top_k = top_k or settings.retrieval_top_k
     dense_limit = dense_limit or settings.retrieval_dense_limit
     sparse_pool = sparse_pool if sparse_pool is not None else settings.retrieval_sparse_pool
     rerank_top_n = rerank_top_n or settings.retrieval_rerank_top_n
+    variants = _normalize_query_variants(query, query_variants=query_variants)
+    resolved_version = (embedding_version or "").strip() or get_active_embedding_version_for_kb(kb_id)
 
-    dense_hits = _dense_search(kb_id, query, dense_limit)
-    sparse_corpus = _scroll_candidates(kb_id, max_points=sparse_pool) if sparse_pool and sparse_pool > 0 else []
+    dense_rrf_rank: dict[str, float] = {}
+    dense_best: dict[str, Candidate] = {}
+    for variant in variants:
+        dense_hits = _dense_search(kb_id, variant, dense_limit, resolved_version)
+        ranked_dense = sorted(dense_hits, key=lambda x: x.dense_score, reverse=True)
+        for rank, candidate in enumerate(ranked_dense, start=1):
+            dense_rrf_rank[candidate.point_id] = dense_rrf_rank.get(candidate.point_id, 0.0) + (1.0 / (RRF_K + rank))
+            existing = dense_best.get(candidate.point_id)
+            if existing is None or candidate.dense_score > existing.dense_score:
+                dense_best[candidate.point_id] = candidate
 
-    # Sparse ranking over bounded corpus snapshot.
-    sparse_scores = _bm25_scores(query, [c.text for c in sparse_corpus])
-    for c, score in zip(sparse_corpus, sparse_scores):
-        c.sparse_score = score
+    sparse_corpus = (
+        _scroll_candidates(kb_id, resolved_version, max_points=sparse_pool)
+        if sparse_pool and sparse_pool > 0
+        else []
+    )
+    sparse_rrf_rank: dict[str, float] = {}
+    sparse_best_scores: dict[str, float] = {}
+    sparse_by_id = {candidate.point_id: candidate for candidate in sparse_corpus}
 
-    dense_rank = {c.point_id: i + 1 for i, c in enumerate(sorted(dense_hits, key=lambda x: x.dense_score, reverse=True))}
-    sparse_rank = {
-        c.point_id: i + 1
-        for i, c in enumerate(sorted(sparse_corpus, key=lambda x: x.sparse_score, reverse=True))
-        if c.sparse_score > 0
-    }
-    fused = _rrf_fuse(dense_rank, sparse_rank)
+    # Sparse ranking over a bounded corpus snapshot for each query variant.
+    docs = [candidate.text for candidate in sparse_corpus]
+    for variant in variants:
+        variant_scores = _bm25_scores(variant, docs)
+        ranked_sparse: list[tuple[str, float]] = []
+        for candidate, score in zip(sparse_corpus, variant_scores):
+            if score <= 0:
+                continue
+            sparse_best_scores[candidate.point_id] = max(sparse_best_scores.get(candidate.point_id, 0.0), score)
+            ranked_sparse.append((candidate.point_id, score))
 
-    # Union the best from both lists before final rerank.
-    by_id: dict[str, Candidate] = {}
-    for c in dense_hits:
-        by_id[c.point_id] = c
-    for c in sparse_corpus:
-        if c.point_id not in by_id:
-            by_id[c.point_id] = c
-        else:
-            by_id[c.point_id].sparse_score = max(by_id[c.point_id].sparse_score, c.sparse_score)
+        ranked_sparse.sort(key=lambda item: item[1], reverse=True)
+        for rank, (point_id, _) in enumerate(ranked_sparse, start=1):
+            sparse_rrf_rank[point_id] = sparse_rrf_rank.get(point_id, 0.0) + (1.0 / (RRF_K + rank))
+
+    # Union the best from dense and sparse lists before final rerank.
+    by_id: dict[str, Candidate] = dict(dense_best)
+    for point_id in sparse_rrf_rank:
+        candidate = sparse_by_id.get(point_id)
+        if candidate is None:
+            continue
+        if point_id not in by_id:
+            by_id[point_id] = candidate
+        by_id[point_id].sparse_score = max(by_id[point_id].sparse_score, sparse_best_scores.get(point_id, 0.0))
 
     merged = list(by_id.values())
     for c in merged:
-        c.final_score = fused.get(c.point_id, 0.0)
+        c.final_score = dense_rrf_rank.get(c.point_id, 0.0) + sparse_rrf_rank.get(c.point_id, 0.0)
     merged.sort(key=lambda x: x.final_score, reverse=True)
 
     pre_rerank = merged[: max(top_k, rerank_top_n)]

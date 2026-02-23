@@ -50,6 +50,20 @@ def delete_collection(kb_id: int, embedding_version: str = DEFAULT_EMBEDDING_VER
     return True
 
 
+def list_collections_for_kb(kb_id: int) -> list[str]:
+    prefix = f"{COLLECTION_PREFIX}_kb{kb_id}_"
+    client = get_qdrant()
+    collections = client.get_collections().collections
+    return [c.name for c in collections if c.name.startswith(prefix)]
+
+
+def delete_all_collections_for_kb(kb_id: int) -> int:
+    names = list_collections_for_kb(kb_id)
+    for name in names:
+        get_qdrant().delete_collection(collection_name=name)
+    return len(names)
+
+
 def upsert_chunks(collection: str, points: list[PointStruct]):
     get_qdrant().upsert(collection_name=collection, points=points)
 

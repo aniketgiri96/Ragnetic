@@ -26,6 +26,7 @@
 - [Visual architecture diagram](architecture/diagram.md)
 - [Ingestion and chunking](architecture/ingestion-and-chunking.md)
 - [Retrieval and reranking](architecture/retrieval-and-reranking.md)
+- [Bottleneck priority plan](architecture/bottleneck-priority-plan.md)
 
 ## Guides
 

@@ -48,6 +48,7 @@ If `OPENAI_API_KEY` is set and the OpenAI SDK is installed, chat uses OpenAI (`g
 |----------|---------|---------|
 | `CHUNK_MAX_CHARS` | `600` | Max chunk size for ingestion |
 | `CHUNK_OVERLAP_CHARS` | `80` | Overlap between adjacent chunks |
+| `CHUNK_OVERLAP_SENTENCES` | `1` | Number of trailing sentences reused between adjacent chunks |
 | `CHUNK_MIN_CHARS` | `180` | Minimum chunk size target before flushing |
 
 ## Chat context settings
@@ -57,8 +58,17 @@ If `OPENAI_API_KEY` is set and the OpenAI SDK is installed, chat uses OpenAI (`g
 | `CHAT_CONTEXT_MAX_SOURCES` | `4` | Max retrieved source snippets inserted into prompt |
 | `CHAT_CONTEXT_MAX_CHARS_PER_SOURCE` | `420` | Per-source snippet character limit in prompt |
 | `CHAT_UNIQUE_SOURCES_PER_DOCUMENT` | `true` | Keep at most one retrieved chunk per document in chat context |
+| `CHAT_MODEL_CONTEXT_TOKENS` | `8192` | Approximate model context window used for adaptive packing |
+| `CHAT_CONTEXT_BUDGET_RATIO` | `0.75` | Fraction of model context allocated to retrieved evidence |
+| `CHAT_CONTEXT_RESERVED_TOKENS` | `1200` | Tokens reserved for system prompt, user query, and response headroom |
+| `CHAT_CONTEXT_MIN_TOKENS_PER_SOURCE` | `80` | Minimum token target for each included source |
+| `CHAT_CONTEXT_MAX_TOKENS_PER_SOURCE` | `260` | Maximum token cap per included source after compression |
+| `CHAT_CONTEXT_COMPRESSION_ENABLED` | `true` | Enable relevance-based snippet compression before prompt assembly |
+| `CHAT_CONTEXT_COMPRESSION_TARGET_RATIO` | `0.60` | Compression target ratio relative to original snippet length |
 | `CHAT_LOW_CONFIDENCE_THRESHOLD` | `0.45` | Marks chat answer as low-confidence when retrieval quality is below this score |
 | `CHAT_ENFORCE_CITATION_FORMAT` | `true` | Appends `[Source N]` citations when model output omits them |
+| `CHAT_ENABLE_FAITHFULNESS_SCORING` | `true` | Compute grounding faithfulness score for generated chat answers |
+| `CHAT_FAITHFULNESS_THRESHOLD` | `0.55` | Marks answer as low-faithfulness when grounding score is below this threshold |
 
 ## Retrieval settings
 
@@ -69,6 +79,21 @@ If `OPENAI_API_KEY` is set and the OpenAI SDK is installed, chat uses OpenAI (`g
 | `RETRIEVAL_SPARSE_POOL` | `240` | Max points scanned for lexical BM25 scoring |
 | `RETRIEVAL_RERANK_TOP_N` | `8` | Number of fused candidates passed to optional rerank |
 | `RETRIEVAL_ENABLE_CROSS_ENCODER` | `false` | Enable local cross-encoder reranking |
+| `RETRIEVAL_ENABLE_QUERY_EXPANSION` | `true` | Expand each user query into multiple retrieval variants |
+| `RETRIEVAL_QUERY_EXPANSION_MAX_VARIANTS` | `4` | Maximum number of query variants used for hybrid fusion |
+| `RETRIEVAL_ENABLE_HYDE` | `false` | Enable LLM-generated HyDE synthetic passage as an additional variant |
+| `RETRIEVAL_HYDE_MAX_CHARS` | `700` | Maximum HyDE synthetic passage length included in retrieval |
+
+## Analytics and drift settings
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `ANALYTICS_DEFAULT_WINDOW_DAYS` | `7` | Default analytics time window when `days` is not provided |
+| `ANALYTICS_TOP_QUERIES_LIMIT` | `8` | Maximum number of top-query rows returned in analytics response |
+| `ANALYTICS_DRIFT_ZERO_RESULT_RATE_THRESHOLD` | `0.30` | Triggers drift alert when zero-result query ratio exceeds this threshold |
+| `ANALYTICS_DRIFT_RETRIEVAL_MS_THRESHOLD` | `1400` | Triggers drift alert when average retrieval latency exceeds this value |
+| `ANALYTICS_DRIFT_LOW_FAITHFULNESS_RATE_THRESHOLD` | `0.30` | Triggers drift alert when low-faithfulness rate exceeds this threshold |
+| `ANALYTICS_DRIFT_LOW_CONFIDENCE_RATE_THRESHOLD` | `0.35` | Triggers drift alert when low-confidence rate exceeds this threshold |
 
 ## Frontend variable
 

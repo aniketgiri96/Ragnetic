@@ -9,7 +9,9 @@ from app.services.access import _role_at_least
 def test_role_hierarchy():
     assert _role_at_least(KnowledgeBaseRole.OWNER, KnowledgeBaseRole.VIEWER) is True
     assert _role_at_least(KnowledgeBaseRole.EDITOR, KnowledgeBaseRole.VIEWER) is True
+    assert _role_at_least(KnowledgeBaseRole.API_USER, KnowledgeBaseRole.VIEWER) is True
     assert _role_at_least(KnowledgeBaseRole.VIEWER, KnowledgeBaseRole.EDITOR) is False
+    assert _role_at_least(KnowledgeBaseRole.API_USER, KnowledgeBaseRole.EDITOR) is False
 
 
 def test_normalize_session_id_accepts_valid():

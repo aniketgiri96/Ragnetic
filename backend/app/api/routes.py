@@ -15,26 +15,72 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy import desc, func
 
 from app.models.base import SessionLocal
+from app.models.analytics import ChatFeedback, FeedbackRating
 from app.models.chat import ChatJob, ChatJobStatus, ChatMessage, ChatRole, ChatSession
 from app.models.audit import AuditLog
 from app.models.document import Document, DocumentStatus, KnowledgeBase, KnowledgeBaseMembership, KnowledgeBaseRole
+from app.models.ingestion import IngestionDeadLetter, IngestionJobReason
+from app.models.tenant import (
+    Organization,
+    OrganizationMembership,
+    OrganizationRole,
+    Team,
+    TeamKnowledgeBaseAccess,
+    TeamMembership,
+    TeamRole,
+)
 from app.models.user import User
 from app.core.config import settings
 from app.services.access import get_default_accessible_kb_id, list_user_knowledge_bases, require_kb_access
+from app.services.analytics import build_rag_analytics_report
 from app.services.audit import log_audit_event, parse_details
+from app.services.context import assemble_context
 from app.services.citations import append_citation_legend, enforce_citation_format
+from app.services.embedding_versions import (
+    fail_embedding_migration,
+    list_embedding_registry,
+    normalize_embedding_version,
+    start_embedding_migration,
+)
+from app.services.faithfulness import faithfulness_signals as compute_faithfulness_signals
+from app.services.ingestion_tracking import (
+    VALID_INGESTION_REASONS,
+    create_ingestion_job,
+    get_connector_sync_state,
+    list_dead_letters,
+    mark_connector_sync,
+    mark_ingestion_job_failed,
+    mark_ingestion_job_queued,
+    should_replace_existing_upload,
+)
 from app.services.llm import generate as llm_generate
 from app.services.llm import generate_stream as llm_generate_stream
-from app.services.qdrant_client import delete_collection, delete_document_chunks
+from app.services.onboarding import build_onboarding_status
+from app.services.query_expansion import build_query_variants
+from app.services.qdrant_client import delete_all_collections_for_kb, delete_document_chunks
 from app.services.retrieval import hybrid_retrieve
 from app.services.storage import delete_file, upload_file
 from app.tasks.chat import process_chat_job
-from app.tasks.ingestion import ingest_document
+from app.tasks.ingestion import ingest_document, migrate_kb_embedding_namespace
 
 VALID_KB_ROLES = {
     KnowledgeBaseRole.OWNER,
     KnowledgeBaseRole.EDITOR,
     KnowledgeBaseRole.VIEWER,
+    KnowledgeBaseRole.API_USER,
+}
+VALID_FEEDBACK_RATINGS = {
+    FeedbackRating.UP,
+    FeedbackRating.DOWN,
+}
+VALID_ORG_ROLES = {
+    OrganizationRole.OWNER,
+    OrganizationRole.ADMIN,
+    OrganizationRole.MEMBER,
+}
+VALID_TEAM_ROLES = {
+    TeamRole.MANAGER,
+    TeamRole.MEMBER,
 }
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 ASYNC_HINT_RE = re.compile(
@@ -63,6 +109,102 @@ def _should_queue_async(message: str) -> bool:
     if len(normalized) >= 260:
         return True
     return bool(ASYNC_HINT_RE.search(normalized))
+
+
+def _compact_query_text(query: str, limit: int = 240) -> str:
+    normalized = (query or "").replace("\n", " ").strip()
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: max(1, limit - 3)] + "..."
+
+
+def _normalize_feedback_rating(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized not in VALID_FEEDBACK_RATINGS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="rating must be 'up' or 'down'",
+        )
+    return normalized
+
+
+ORG_ROLE_RANK = {
+    OrganizationRole.MEMBER: 1,
+    OrganizationRole.ADMIN: 2,
+    OrganizationRole.OWNER: 3,
+}
+TEAM_ROLE_RANK = {
+    TeamRole.MEMBER: 1,
+    TeamRole.MANAGER: 2,
+}
+
+
+def _role_at_least(rank_map: dict[str, int], role: str, min_role: str) -> bool:
+    return rank_map.get(role, 0) >= rank_map.get(min_role, 0)
+
+
+def _normalize_org_role(role: str | None, default: str = OrganizationRole.MEMBER) -> str:
+    normalized = (role or default).strip().lower()
+    if normalized not in VALID_ORG_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid organization role. Allowed roles: owner, admin, member.",
+        )
+    return normalized
+
+
+def _normalize_team_role(role: str | None, default: str = TeamRole.MEMBER) -> str:
+    normalized = (role or default).strip().lower()
+    if normalized not in VALID_TEAM_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid team role. Allowed roles: manager, member.",
+        )
+    return normalized
+
+
+def _require_org_membership(
+    db,
+    user_id: int,
+    org_id: int,
+    min_role: str = OrganizationRole.MEMBER,
+) -> OrganizationMembership:
+    membership = (
+        db.query(OrganizationMembership)
+        .filter(
+            OrganizationMembership.organization_id == org_id,
+            OrganizationMembership.user_id == user_id,
+        )
+        .first()
+    )
+    if membership is None or not _role_at_least(ORG_ROLE_RANK, membership.role, min_role):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Insufficient permissions for organization {org_id}",
+        )
+    return membership
+
+
+def _require_team_membership(
+    db,
+    user_id: int,
+    team_id: int,
+    min_role: str = TeamRole.MEMBER,
+) -> TeamMembership:
+    membership = (
+        db.query(TeamMembership)
+        .filter(
+            TeamMembership.team_id == team_id,
+            TeamMembership.user_id == user_id,
+        )
+        .first()
+    )
+    if membership is None or not _role_at_least(TEAM_ROLE_RANK, membership.role, min_role):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Insufficient permissions for team {team_id}",
+        )
+    return membership
 
 
 def _sse(event: str, payload: dict[str, Any]) -> str:
@@ -197,6 +339,15 @@ def _chat_quality_signals(sources: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _faithfulness_signals(answer: str, sources: list[dict[str, Any]]) -> dict[str, Any]:
+    return compute_faithfulness_signals(
+        answer=answer,
+        sources=sources,
+        threshold=settings.chat_faithfulness_threshold,
+        enabled=settings.chat_enable_faithfulness_scoring,
+    )
+
+
 def _source_identity(source: dict[str, Any], index: int) -> str:
     metadata = source.get("metadata") or {}
     doc_id = metadata.get("doc_id")
@@ -234,6 +385,52 @@ def _enforce_citation_format(answer: str, sources: list[dict[str, Any]]) -> str:
 
 def _append_citation_legend(answer: str, sources: list[dict[str, Any]]) -> str:
     return append_citation_legend(answer, sources, legend_header="Source references")
+
+
+def _queue_document_ingestion_job(
+    db,
+    *,
+    user_id: int | None,
+    kb_id: int,
+    document_id: int,
+    reason: str,
+) -> int:
+    normalized_reason = (reason or "").strip().lower()
+    if normalized_reason not in VALID_INGESTION_REASONS:
+        normalized_reason = IngestionJobReason.RETRY
+
+    job = create_ingestion_job(
+        db,
+        document_id=document_id,
+        knowledge_base_id=kb_id,
+        requested_by_user_id=user_id,
+        reason=normalized_reason,
+    )
+    db.commit()
+    db.refresh(job)
+
+    try:
+        queued = ingest_document.delay(document_id, job.id)
+        task_id = getattr(queued, "id", None)
+        mark_ingestion_job_queued(db, job_id=job.id, celery_task_id=task_id)
+        return job.id
+    except Exception as queue_err:
+        doc = db.query(Document).filter(Document.id == document_id).first()
+        if doc is not None:
+            doc.status = DocumentStatus.FAILED
+            doc.error_message = str(queue_err)
+            db.commit()
+        mark_ingestion_job_failed(
+            db,
+            job_id=job.id,
+            error_message=str(queue_err),
+            failure_stage="queue",
+            record_dead_letter=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to queue ingestion job.",
+        ) from queue_err
 
 
 async def upload_document(
@@ -311,6 +508,54 @@ async def upload_document(
                 }
 
             if existing_by_name is not None:
+                if should_replace_existing_upload(
+                    existing_hash=existing_by_name.content_hash,
+                    incoming_hash=content_hash,
+                    replace_existing=bool(replace_existing),
+                ):
+                    previous_object_key = existing_by_name.object_key
+                    upload_file(
+                        object_key,
+                        io.BytesIO(content),
+                        len(content),
+                        file.content_type or "application/octet-stream",
+                    )
+                    existing_by_name.object_key = object_key
+                    existing_by_name.content_hash = content_hash
+                    existing_by_name.status = DocumentStatus.PENDING
+                    existing_by_name.error_message = None
+                    log_audit_event(
+                        db,
+                        user_id=user.id,
+                        knowledge_base_id=kb,
+                        action="document.upload.replaced",
+                        resource_type="document",
+                        resource_id=str(existing_by_name.id),
+                        details={"filename": filename},
+                    )
+                    db.commit()
+                    db.refresh(existing_by_name)
+                    try:
+                        delete_file(previous_object_key)
+                    except Exception:
+                        pass
+
+                    job_id = _queue_document_ingestion_job(
+                        db,
+                        user_id=user.id,
+                        kb_id=kb,
+                        document_id=existing_by_name.id,
+                        reason=IngestionJobReason.REPLACE,
+                    )
+                    return {
+                        "filename": filename,
+                        "status": "queued",
+                        "document_id": existing_by_name.id,
+                        "ingestion_job_id": job_id,
+                        "replaced": True,
+                        "message": "Existing document replaced and re-indexing queued.",
+                    }
+
                 log_audit_event(
                     db,
                     user_id=user.id,
@@ -325,8 +570,8 @@ async def upload_document(
                     "filename": filename,
                     "status": "exists",
                     "document_id": existing_by_name.id,
-                    "replace_required": False,
-                    "message": "Filename already exists in this knowledge base (case-insensitive). Upload blocked. Rename or delete the existing document first.",
+                    "replace_required": True,
+                    "message": "Filename already exists in this knowledge base (case-insensitive). Set replace_existing=true to replace and re-index, or rename/delete the existing document first.",
                 }
 
             if existing_by_hash:
@@ -371,8 +616,14 @@ async def upload_document(
             )
             db.commit()
             db.refresh(doc)
-            ingest_document.delay(doc.id)
-            return {"filename": filename, "status": "queued", "document_id": doc.id}
+            job_id = _queue_document_ingestion_job(
+                db,
+                user_id=user.id,
+                kb_id=kb,
+                document_id=doc.id,
+                reason=IngestionJobReason.UPLOAD,
+            )
+            return {"filename": filename, "status": "queued", "document_id": doc.id, "ingestion_job_id": job_id}
         finally:
             db.close()
     except HTTPException:
@@ -386,8 +637,33 @@ async def upload_document(
 
 async def search_documents(user: User, query: str, kb_id: int = Query(None)):
     kb = _resolve_kb_for_user(user, kb_id, min_role=KnowledgeBaseRole.VIEWER)
+    started = time.monotonic()
     try:
-        results = hybrid_retrieve(kb_id=kb, query=query, top_k=5)
+        query_variants = await build_query_variants(query=query)
+        results = hybrid_retrieve(kb_id=kb, query=query, top_k=5, query_variants=query_variants)
+        retrieval_ms = int((time.monotonic() - started) * 1000)
+        db = SessionLocal()
+        try:
+            log_audit_event(
+                db,
+                user_id=user.id,
+                knowledge_base_id=kb,
+                action="search.query",
+                resource_type="knowledge_base",
+                resource_id=str(kb),
+                details={
+                    "query_text": _compact_query_text(query),
+                    "result_count": len(results),
+                    "zero_result": len(results) == 0,
+                    "retrieval_ms": retrieval_ms,
+                },
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.warning("Failed to persist search analytics for kb_id=%s", kb)
+        finally:
+            db.close()
         return [
             {
                 "snippet": (r.get("snippet") or "")[:300],
@@ -405,11 +681,25 @@ async def search_documents(user: User, query: str, kb_id: int = Query(None)):
         ) from e
 
 
-def _retrieve_for_chat(kb_id: int, query: str, limit: int = 5) -> list[dict[str, Any]]:
+def _retrieve_for_chat(
+    kb_id: int,
+    query: str,
+    limit: int = 5,
+    query_variants: list[str] | None = None,
+) -> list[dict[str, Any]]:
     """Return list of {snippet, metadata} for RAG context."""
     try:
         retrieval_limit = max(limit, limit * 3) if settings.chat_unique_sources_per_document else limit
-        results = hybrid_retrieve(kb_id=kb_id, query=query, top_k=retrieval_limit)
+        if query_variants:
+            results = hybrid_retrieve(
+                kb_id=kb_id,
+                query=query,
+                top_k=retrieval_limit,
+                query_variants=query_variants,
+            )
+        else:
+            # Backward-compatible invocation shape (used by existing tests/mocks).
+            results = hybrid_retrieve(kb_id=kb_id, query=query, top_k=retrieval_limit)
         mapped = [
             {"snippet": r.get("snippet", ""), "metadata": r.get("metadata", {}), "score": r.get("score", 0.0)}
             for r in results
@@ -423,11 +713,21 @@ def _retrieve_for_chat(kb_id: int, query: str, limit: int = 5) -> list[dict[str,
         ) from e
 
 
-def _build_chat_prompt(message: str, history: str, sources: list[dict[str, Any]]) -> tuple[str, str, str]:
+def _build_chat_prompt(
+    message: str,
+    history: str,
+    sources: list[dict[str, Any]],
+) -> tuple[str, str, str, list[dict[str, Any]], dict[str, int]]:
     source_char_limit = max(120, settings.chat_context_max_chars_per_source)
-    context_blocks = "\n\n---\n\n".join(
-        f"[Source {i + 1}]\n{(s['snippet'] or '')[:source_char_limit]}" for i, s in enumerate(sources)
+    source_limit = max(1, settings.chat_context_max_sources)
+    assembly = assemble_context(
+        query=message,
+        history=history,
+        sources=sources,
+        max_sources=source_limit,
+        per_source_char_limit=source_char_limit,
     )
+    context_blocks = assembly.context_blocks
     system = (
         "You are a grounded assistant for this RAG system. "
         "Use only the provided context blocks for factual claims; never invent details. "
@@ -444,7 +744,17 @@ def _build_chat_prompt(message: str, history: str, sources: list[dict[str, Any]]
     )
     history_block = f"Conversation history:\n{history}\n\n" if history else ""
     user_prompt = f"{history_block}Context:\n\n{context_blocks}\n\nQuestion: {message}"
-    return system, user_prompt, context_blocks
+    return (
+        system,
+        user_prompt,
+        context_blocks,
+        assembly.sources,
+        {
+            "token_budget": int(assembly.token_budget),
+            "token_used": int(assembly.token_used),
+            "compressed_sources": int(assembly.compressed_sources),
+        },
+    )
 
 
 def _fallback_answer_from_sources(question: str, sources: list[dict[str, Any]], detail: str) -> str:
@@ -544,13 +854,28 @@ async def chat_rag(
         history = _history_for_prompt(db, session_key, max_messages=10)
 
         source_limit = max(1, settings.chat_context_max_sources)
-        sources: list[dict[str, Any]] = _retrieve_for_chat(kb, message, limit=source_limit)
-        system, user_prompt, context_blocks = _build_chat_prompt(message=message, history=history, sources=sources)
+        retrieval_started = time.monotonic()
+        query_variants = await build_query_variants(query=message, history=history)
+        retrieved_sources: list[dict[str, Any]] = _retrieve_for_chat(
+            kb,
+            message,
+            limit=source_limit,
+            query_variants=query_variants,
+        )
+        retrieval_ms = int((time.monotonic() - retrieval_started) * 1000)
+        system, user_prompt, context_blocks, sources, context_stats = _build_chat_prompt(
+            message=message,
+            history=history,
+            sources=retrieved_sources,
+        )
         if not context_blocks:
             answer = "No relevant documents found in the selected knowledge base yet. Upload documents and try again."
             quality = _chat_quality_signals(sources=[])
+            faithfulness = _faithfulness_signals(answer=answer, sources=[])
             db.add(ChatMessage(session_id=session_key, role=ChatRole.USER, content=message))
-            db.add(ChatMessage(session_id=session_key, role=ChatRole.ASSISTANT, content=answer))
+            assistant_message = ChatMessage(session_id=session_key, role=ChatRole.ASSISTANT, content=answer)
+            db.add(assistant_message)
+            db.flush()
             session.updated_at = datetime.utcnow()
             log_audit_event(
                 db,
@@ -561,9 +886,17 @@ async def chat_rag(
                 resource_id=session_key,
                 details={
                     "message_length": len((message or "").strip()),
+                    "query_text": _compact_query_text(message),
                     "source_count": 0,
+                    "zero_result": True,
+                    "retrieval_ms": retrieval_ms,
                     "confidence_score": quality["confidence_score"],
                     "low_confidence": quality["low_confidence"],
+                    "context_token_budget": context_stats["token_budget"],
+                    "context_token_used": context_stats["token_used"],
+                    "context_compressed_sources": context_stats["compressed_sources"],
+                    "faithfulness_score": faithfulness["faithfulness_score"],
+                    "low_faithfulness": faithfulness["low_faithfulness"],
                 },
             )
             db.commit()
@@ -571,8 +904,12 @@ async def chat_rag(
                 "answer": answer,
                 "sources": [],
                 "session_id": session_key,
+                "assistant_message_id": assistant_message.id,
                 "citation_enforced": False,
+                "context_token_budget": context_stats["token_budget"],
+                "context_token_used": context_stats["token_used"],
                 **quality,
+                **faithfulness,
             }
 
         try:
@@ -584,9 +921,12 @@ async def chat_rag(
         answer = _enforce_citation_format(answer, sources)
         answer = _append_citation_legend(answer, sources)
         quality = _chat_quality_signals(sources)
+        faithfulness = _faithfulness_signals(answer=answer, sources=sources)
 
         db.add(ChatMessage(session_id=session_key, role=ChatRole.USER, content=message))
-        db.add(ChatMessage(session_id=session_key, role=ChatRole.ASSISTANT, content=answer))
+        assistant_message = ChatMessage(session_id=session_key, role=ChatRole.ASSISTANT, content=answer)
+        db.add(assistant_message)
+        db.flush()
         session.updated_at = datetime.utcnow()
         log_audit_event(
             db,
@@ -597,9 +937,17 @@ async def chat_rag(
             resource_id=session_key,
             details={
                 "message_length": len((message or "").strip()),
+                "query_text": _compact_query_text(message),
                 "source_count": len(sources),
+                "zero_result": len(sources) == 0,
+                "retrieval_ms": retrieval_ms,
                 "confidence_score": quality["confidence_score"],
                 "low_confidence": quality["low_confidence"],
+                "context_token_budget": context_stats["token_budget"],
+                "context_token_used": context_stats["token_used"],
+                "context_compressed_sources": context_stats["compressed_sources"],
+                "faithfulness_score": faithfulness["faithfulness_score"],
+                "low_faithfulness": faithfulness["low_faithfulness"],
             },
         )
         db.commit()
@@ -607,8 +955,12 @@ async def chat_rag(
             "answer": answer,
             "sources": sources,
             "session_id": session_key,
+            "assistant_message_id": assistant_message.id,
             "citation_enforced": bool(settings.chat_enforce_citation_format and sources),
+            "context_token_budget": context_stats["token_budget"],
+            "context_token_used": context_stats["token_used"],
             **quality,
+            **faithfulness,
         }
     finally:
         db.close()
@@ -645,8 +997,15 @@ async def chat_rag_stream(
 
     async def event_stream():
         started_at = time.monotonic()
+        retrieval_started = time.monotonic()
+        retrieval_ms = 0
         source_limit = max(1, settings.chat_context_max_sources)
         sources: list[dict[str, Any]] = []
+        context_stats: dict[str, int] = {
+            "token_budget": 0,
+            "token_used": 0,
+            "compressed_sources": 0,
+        }
         answer = ""
         fallback = False
         last_heartbeat = started_at
@@ -659,7 +1018,13 @@ async def chat_rag_stream(
         yield _sse("reasoning", _reasoning_event("retrieve", "Searching relevant knowledge base content.", elapsed_ms()))
 
         try:
-            sources = _retrieve_for_chat(kb, message, limit=source_limit)
+            query_variants = await build_query_variants(query=message, history=history)
+            sources = _retrieve_for_chat(
+                kb,
+                message,
+                limit=source_limit,
+                query_variants=query_variants,
+            )
         except HTTPException as e:
             detail = str(e.detail).strip() if getattr(e, "detail", None) else "Retrieval backend unavailable"
             fallback = True
@@ -675,12 +1040,18 @@ async def chat_rag_stream(
             previews = _source_previews(sources, limit=3)
             if previews:
                 yield _sse("sources_preview", {"sources": previews, "elapsed_ms": elapsed_ms()})
+        finally:
+            retrieval_ms = int((time.monotonic() - retrieval_started) * 1000)
 
         system = ""
         user_prompt = ""
         context_blocks = ""
         if not fallback:
-            system, user_prompt, context_blocks = _build_chat_prompt(message=message, history=history, sources=sources)
+            system, user_prompt, context_blocks, sources, context_stats = _build_chat_prompt(
+                message=message,
+                history=history,
+                sources=sources,
+            )
 
             if not context_blocks:
                 fallback = True
@@ -723,12 +1094,17 @@ async def chat_rag_stream(
         answer = _enforce_citation_format(answer, sources)
         answer = _append_citation_legend(answer, sources)
         quality = _chat_quality_signals(sources)
+        faithfulness = _faithfulness_signals(answer=answer, sources=sources)
         citation_enforced = bool(settings.chat_enforce_citation_format and sources)
+        assistant_message_id: int | None = None
 
         db2 = SessionLocal()
         try:
             session = _get_or_create_chat_session(db2, user_id=user.id, kb_id=kb, session_id=session_key)
-            db2.add(ChatMessage(session_id=session_key, role=ChatRole.ASSISTANT, content=answer))
+            assistant_message = ChatMessage(session_id=session_key, role=ChatRole.ASSISTANT, content=answer)
+            db2.add(assistant_message)
+            db2.flush()
+            assistant_message_id = assistant_message.id
             session.updated_at = datetime.utcnow()
             log_audit_event(
                 db2,
@@ -738,10 +1114,19 @@ async def chat_rag_stream(
                 resource_type="chat_session",
                 resource_id=session_key,
                 details={
+                    "query_text": _compact_query_text(message),
                     "source_count": len(sources),
+                    "zero_result": len(sources) == 0,
                     "fallback": fallback,
+                    "retrieval_ms": retrieval_ms,
+                    "elapsed_ms": elapsed_ms(),
                     "confidence_score": quality["confidence_score"],
                     "low_confidence": quality["low_confidence"],
+                    "context_token_budget": context_stats["token_budget"],
+                    "context_token_used": context_stats["token_used"],
+                    "context_compressed_sources": context_stats["compressed_sources"],
+                    "faithfulness_score": faithfulness["faithfulness_score"],
+                    "low_faithfulness": faithfulness["low_faithfulness"],
                 },
             )
             db2.commit()
@@ -755,10 +1140,14 @@ async def chat_rag_stream(
                 "answer": answer,
                 "sources": sources,
                 "session_id": session_key,
+                "assistant_message_id": assistant_message_id,
                 "fallback": fallback,
                 "elapsed_ms": elapsed_ms(),
                 "citation_enforced": citation_enforced,
+                "context_token_budget": context_stats["token_budget"],
+                "context_token_used": context_stats["token_used"],
                 **quality,
+                **faithfulness,
             },
         )
 
@@ -792,20 +1181,134 @@ def get_chat_job(user: User, job_id: str) -> dict[str, Any]:
                     sources = parsed
             except json.JSONDecodeError:
                 sources = []
+        assistant_message_id = None
+        if job.status == ChatJobStatus.COMPLETED:
+            row = (
+                db.query(ChatMessage.id)
+                .filter(
+                    ChatMessage.session_id == job.session_id,
+                    ChatMessage.role == ChatRole.ASSISTANT,
+                )
+                .order_by(desc(ChatMessage.id))
+                .first()
+            )
+            assistant_message_id = int(row[0]) if row else None
+        feedback_rating = None
+        if assistant_message_id is not None:
+            feedback_row = (
+                db.query(ChatFeedback)
+                .filter(
+                    ChatFeedback.user_id == user.id,
+                    ChatFeedback.chat_message_id == assistant_message_id,
+                )
+                .first()
+            )
+            if feedback_row is not None:
+                feedback_rating = feedback_row.rating
         quality = _chat_quality_signals(sources)
+        answer_text = job.answer or ""
+        faithfulness = _faithfulness_signals(answer=answer_text, sources=sources)
         return {
             "job_id": job.id,
             "status": job.status,
             "session_id": job.session_id,
             "answer": job.answer,
             "sources": sources,
+            "assistant_message_id": assistant_message_id,
+            "feedback_rating": feedback_rating,
             "citation_enforced": bool(settings.chat_enforce_citation_format and sources),
             **quality,
+            **faithfulness,
             "error_message": job.error_message,
             "created_at": job.created_at.isoformat() if job.created_at else None,
             "started_at": job.started_at.isoformat() if job.started_at else None,
             "finished_at": job.finished_at.isoformat() if job.finished_at else None,
         }
+    finally:
+        db.close()
+
+
+def submit_chat_feedback(
+    user: User,
+    message_id: int,
+    rating: str,
+    comment: str | None = None,
+) -> dict[str, Any]:
+    normalized_rating = _normalize_feedback_rating(rating)
+    normalized_comment = (comment or "").strip()[:1000] or None
+
+    db = SessionLocal()
+    try:
+        message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
+        if message is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat message not found")
+        if message.role != ChatRole.ASSISTANT:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Feedback is only allowed for assistant messages")
+
+        session = db.query(ChatSession).filter(ChatSession.id == message.session_id).first()
+        if session is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat session not found")
+        if session.user_id != user.id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chat message not found")
+        require_kb_access(db, user.id, session.knowledge_base_id, min_role=KnowledgeBaseRole.VIEWER)
+
+        row = (
+            db.query(ChatFeedback)
+            .filter(
+                ChatFeedback.user_id == user.id,
+                ChatFeedback.chat_message_id == message.id,
+            )
+            .first()
+        )
+        if row is None:
+            row = ChatFeedback(
+                user_id=user.id,
+                knowledge_base_id=session.knowledge_base_id,
+                session_id=session.id,
+                chat_message_id=message.id,
+                rating=normalized_rating,
+                comment=normalized_comment,
+            )
+            db.add(row)
+        else:
+            row.rating = normalized_rating
+            row.comment = normalized_comment
+            row.knowledge_base_id = session.knowledge_base_id
+            row.session_id = session.id
+
+        log_audit_event(
+            db,
+            user_id=user.id,
+            knowledge_base_id=session.knowledge_base_id,
+            action="chat.feedback.submit",
+            resource_type="chat_message",
+            resource_id=str(message.id),
+            details={
+                "rating": normalized_rating,
+                "comment_length": len(normalized_comment or ""),
+                "session_id": session.id,
+            },
+        )
+        db.commit()
+        db.refresh(row)
+        return {
+            "message_id": message.id,
+            "session_id": session.id,
+            "kb_id": session.knowledge_base_id,
+            "rating": row.rating,
+            "comment": row.comment,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+    finally:
+        db.close()
+
+
+def get_kb_rag_analytics(user: User, kb_id: int, days: int | None = None) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        require_kb_access(db, user.id, kb_id, min_role=KnowledgeBaseRole.OWNER)
+        return build_rag_analytics_report(db, kb_id=kb_id, days=days)
     finally:
         db.close()
 
@@ -826,6 +1329,463 @@ def list_knowledge_bases(user: User) -> list:
     db = SessionLocal()
     try:
         return list_user_knowledge_bases(db, user.id)
+    finally:
+        db.close()
+
+
+def get_onboarding_status(user: User) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        return build_onboarding_status(db, user_id=user.id)
+    finally:
+        db.close()
+
+
+def create_onboarding_sample_kb(user: User) -> dict[str, Any]:
+    sample_kb_name = "KnowAI Starter KB"
+    sample_kb_description = "Preloaded starter knowledge base for first-time onboarding."
+    sample_filename = "knowai-starter-guide.md"
+    sample_text = (
+        "# KnowAI Starter Guide\n\n"
+        "## Welcome\n"
+        "This starter knowledge base helps you run your first grounded query quickly.\n\n"
+        "## Suggested Questions\n"
+        "- What are the first onboarding steps?\n"
+        "- How do we verify retrieval quality?\n"
+        "- Which endpoints are used for uploads and chat?\n\n"
+        "## Validation Checklist\n"
+        "1. Upload at least one document.\n"
+        "2. Run search for a policy term.\n"
+        "3. Ask a chat question and verify citations.\n"
+    )
+    content = sample_text.encode("utf-8")
+    content_hash = hashlib.sha256(content).hexdigest()
+    object_key = f"uploads/{uuid.uuid4().hex}/{sample_filename}"
+
+    db = SessionLocal()
+    try:
+        kb = KnowledgeBase(name=sample_kb_name, description=sample_kb_description)
+        db.add(kb)
+        db.flush()
+        db.add(
+            KnowledgeBaseMembership(
+                knowledge_base_id=kb.id,
+                user_id=user.id,
+                role=KnowledgeBaseRole.OWNER,
+            )
+        )
+        upload_file(object_key, io.BytesIO(content), len(content), "text/markdown")
+        doc = Document(
+            knowledge_base_id=kb.id,
+            filename=sample_filename,
+            object_key=object_key,
+            content_hash=content_hash,
+            status=DocumentStatus.PENDING,
+        )
+        db.add(doc)
+        db.flush()
+        job_id = create_ingestion_job(
+            db,
+            requested_by_user_id=user.id,
+            kb_id=kb.id,
+            document_id=doc.id,
+            reason=IngestionJobReason.UPLOAD,
+        )
+        log_audit_event(
+            db,
+            user_id=user.id,
+            knowledge_base_id=kb.id,
+            action="onboarding.sample_kb.create",
+            resource_type="knowledge_base",
+            resource_id=str(kb.id),
+            details={"sample_document": sample_filename, "ingestion_job_id": job_id},
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    try:
+        ingest_document.delay(doc.id, content, sample_filename, object_key)
+    except Exception as exc:
+        db2 = SessionLocal()
+        try:
+            _update_doc_status(doc.id, DocumentStatus.FAILED, str(exc))
+            mark_ingestion_job_failed(db2, job_id=job_id, error_message=str(exc), progress=0)
+            db2.commit()
+        finally:
+            db2.close()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to queue onboarding sample ingestion job.",
+        ) from exc
+
+    return {
+        "kb_id": kb.id,
+        "kb_name": sample_kb_name,
+        "document_id": doc.id,
+        "ingestion_job_id": job_id,
+        "status": "queued",
+    }
+
+
+def list_organizations(user: User) -> list[dict[str, Any]]:
+    db = SessionLocal()
+    try:
+        rows = (
+            db.query(Organization, OrganizationMembership.role)
+            .join(
+                OrganizationMembership,
+                OrganizationMembership.organization_id == Organization.id,
+            )
+            .filter(OrganizationMembership.user_id == user.id)
+            .order_by(Organization.created_at.asc(), Organization.id.asc())
+            .all()
+        )
+        return [
+            {
+                "id": org.id,
+                "name": org.name,
+                "description": org.description,
+                "role": role,
+                "created_at": org.created_at.isoformat() if org.created_at else None,
+            }
+            for org, role in rows
+        ]
+    finally:
+        db.close()
+
+
+def create_organization(user: User, name: str, description: str | None = None) -> dict[str, Any]:
+    org_name = _normalize_kb_name(name)
+    org_description = _normalize_kb_description(description)
+    db = SessionLocal()
+    try:
+        org = Organization(name=org_name, description=org_description)
+        db.add(org)
+        db.flush()
+        db.add(
+            OrganizationMembership(
+                organization_id=org.id,
+                user_id=user.id,
+                role=OrganizationRole.OWNER,
+            )
+        )
+        log_audit_event(
+            db,
+            user_id=user.id,
+            knowledge_base_id=None,
+            action="org.create",
+            resource_type="organization",
+            resource_id=str(org.id),
+            details={"name": org_name},
+        )
+        db.commit()
+        return {
+            "id": org.id,
+            "name": org.name,
+            "description": org.description,
+            "role": OrganizationRole.OWNER,
+            "created_at": org.created_at.isoformat() if org.created_at else None,
+        }
+    finally:
+        db.close()
+
+
+def add_organization_member(user: User, org_id: int, email: str, role: str) -> dict[str, Any]:
+    target_role = _normalize_org_role(role)
+    db = SessionLocal()
+    try:
+        _require_org_membership(db, user.id, org_id, min_role=OrganizationRole.ADMIN)
+        target_user = db.query(User).filter(User.email == email.strip().lower()).first()
+        if target_user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{email}' not found.")
+
+        membership = (
+            db.query(OrganizationMembership)
+            .filter(
+                OrganizationMembership.organization_id == org_id,
+                OrganizationMembership.user_id == target_user.id,
+            )
+            .first()
+        )
+        if membership is None:
+            membership = OrganizationMembership(
+                organization_id=org_id,
+                user_id=target_user.id,
+                role=target_role,
+            )
+            db.add(membership)
+        else:
+            membership.role = target_role
+        log_audit_event(
+            db,
+            user_id=user.id,
+            knowledge_base_id=None,
+            action="org.member.upsert",
+            resource_type="organization_membership",
+            resource_id=f"{org_id}:{target_user.id}",
+            details={"email": target_user.email, "role": target_role},
+        )
+        db.commit()
+        return {
+            "org_id": org_id,
+            "user_id": target_user.id,
+            "email": target_user.email,
+            "role": membership.role,
+            "created_at": membership.created_at.isoformat() if membership.created_at else None,
+        }
+    finally:
+        db.close()
+
+
+def list_organization_teams(user: User, org_id: int) -> list[dict[str, Any]]:
+    db = SessionLocal()
+    try:
+        _require_org_membership(db, user.id, org_id, min_role=OrganizationRole.MEMBER)
+        rows = (
+            db.query(Team)
+            .filter(Team.organization_id == org_id)
+            .order_by(Team.created_at.asc(), Team.id.asc())
+            .all()
+        )
+        return [
+            {
+                "id": team.id,
+                "organization_id": team.organization_id,
+                "name": team.name,
+                "description": team.description,
+                "created_at": team.created_at.isoformat() if team.created_at else None,
+            }
+            for team in rows
+        ]
+    finally:
+        db.close()
+
+
+def create_organization_team(user: User, org_id: int, name: str, description: str | None = None) -> dict[str, Any]:
+    team_name = _normalize_kb_name(name)
+    team_description = _normalize_kb_description(description)
+    db = SessionLocal()
+    try:
+        _require_org_membership(db, user.id, org_id, min_role=OrganizationRole.ADMIN)
+        team = Team(organization_id=org_id, name=team_name, description=team_description)
+        db.add(team)
+        db.flush()
+        db.add(
+            TeamMembership(
+                team_id=team.id,
+                user_id=user.id,
+                role=TeamRole.MANAGER,
+            )
+        )
+        log_audit_event(
+            db,
+            user_id=user.id,
+            knowledge_base_id=None,
+            action="team.create",
+            resource_type="team",
+            resource_id=str(team.id),
+            details={"organization_id": org_id, "name": team_name},
+        )
+        db.commit()
+        return {
+            "id": team.id,
+            "organization_id": team.organization_id,
+            "name": team.name,
+            "description": team.description,
+            "created_at": team.created_at.isoformat() if team.created_at else None,
+        }
+    finally:
+        db.close()
+
+
+def add_team_member(user: User, team_id: int, email: str, role: str) -> dict[str, Any]:
+    target_role = _normalize_team_role(role)
+    db = SessionLocal()
+    try:
+        team = db.query(Team).filter(Team.id == team_id).first()
+        if team is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+        _require_org_membership(db, user.id, team.organization_id, min_role=OrganizationRole.ADMIN)
+
+        target_user = db.query(User).filter(User.email == email.strip().lower()).first()
+        if target_user is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{email}' not found.")
+
+        org_membership = (
+            db.query(OrganizationMembership)
+            .filter(
+                OrganizationMembership.organization_id == team.organization_id,
+                OrganizationMembership.user_id == target_user.id,
+            )
+            .first()
+        )
+        if org_membership is None:
+            org_membership = OrganizationMembership(
+                organization_id=team.organization_id,
+                user_id=target_user.id,
+                role=OrganizationRole.MEMBER,
+            )
+            db.add(org_membership)
+
+        membership = (
+            db.query(TeamMembership)
+            .filter(
+                TeamMembership.team_id == team_id,
+                TeamMembership.user_id == target_user.id,
+            )
+            .first()
+        )
+        if membership is None:
+            membership = TeamMembership(team_id=team_id, user_id=target_user.id, role=target_role)
+            db.add(membership)
+        else:
+            membership.role = target_role
+
+        log_audit_event(
+            db,
+            user_id=user.id,
+            knowledge_base_id=None,
+            action="team.member.upsert",
+            resource_type="team_membership",
+            resource_id=f"{team_id}:{target_user.id}",
+            details={"email": target_user.email, "role": target_role},
+        )
+        db.commit()
+        return {
+            "team_id": team_id,
+            "user_id": target_user.id,
+            "email": target_user.email,
+            "role": membership.role,
+            "created_at": membership.created_at.isoformat() if membership.created_at else None,
+        }
+    finally:
+        db.close()
+
+
+def assign_team_kb_access(user: User, team_id: int, kb_id: int, role: str) -> dict[str, Any]:
+    target_role = _assert_valid_kb_role(role)
+    db = SessionLocal()
+    try:
+        team = db.query(Team).filter(Team.id == team_id).first()
+        if team is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Team not found")
+        _require_org_membership(db, user.id, team.organization_id, min_role=OrganizationRole.ADMIN)
+        require_kb_access(db, user.id, kb_id, min_role=KnowledgeBaseRole.OWNER)
+
+        row = (
+            db.query(TeamKnowledgeBaseAccess)
+            .filter(
+                TeamKnowledgeBaseAccess.team_id == team_id,
+                TeamKnowledgeBaseAccess.knowledge_base_id == kb_id,
+            )
+            .first()
+        )
+        if row is None:
+            row = TeamKnowledgeBaseAccess(team_id=team_id, knowledge_base_id=kb_id, role=target_role)
+            db.add(row)
+        else:
+            row.role = target_role
+
+        log_audit_event(
+            db,
+            user_id=user.id,
+            knowledge_base_id=kb_id,
+            action="team.kb_access.upsert",
+            resource_type="team_kb_access",
+            resource_id=f"{team_id}:{kb_id}",
+            details={"team_id": team_id, "role": target_role},
+        )
+        db.commit()
+        return {
+            "team_id": team_id,
+            "kb_id": kb_id,
+            "role": row.role,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+    finally:
+        db.close()
+
+
+def list_kb_team_access(user: User, kb_id: int) -> list[dict[str, Any]]:
+    db = SessionLocal()
+    try:
+        require_kb_access(db, user.id, kb_id, min_role=KnowledgeBaseRole.VIEWER)
+        rows = (
+            db.query(TeamKnowledgeBaseAccess, Team)
+            .join(Team, Team.id == TeamKnowledgeBaseAccess.team_id)
+            .filter(TeamKnowledgeBaseAccess.knowledge_base_id == kb_id)
+            .order_by(TeamKnowledgeBaseAccess.created_at.asc(), TeamKnowledgeBaseAccess.id.asc())
+            .all()
+        )
+        return [
+            {
+                "team_id": access.team_id,
+                "team_name": team.name,
+                "organization_id": team.organization_id,
+                "kb_id": access.knowledge_base_id,
+                "role": access.role,
+                "created_at": access.created_at.isoformat() if access.created_at else None,
+            }
+            for access, team in rows
+        ]
+    finally:
+        db.close()
+
+
+def get_embedding_registry(user: User, kb_id: int) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        require_kb_access(db, user.id, kb_id, min_role=KnowledgeBaseRole.OWNER)
+        return list_embedding_registry(db, kb_id)
+    finally:
+        db.close()
+
+
+def start_embedding_migration_for_kb(user: User, kb_id: int, target_version: str) -> dict[str, Any]:
+    version = normalize_embedding_version(target_version)
+    db = SessionLocal()
+    try:
+        require_kb_access(db, user.id, kb_id, min_role=KnowledgeBaseRole.OWNER)
+        namespace = start_embedding_migration(
+            db,
+            kb_id=kb_id,
+            target_version=version,
+            model_name=None,
+        )
+        log_audit_event(
+            db,
+            user_id=user.id,
+            knowledge_base_id=kb_id,
+            action="embedding.migration.start",
+            resource_type="embedding_namespace",
+            resource_id=str(kb_id),
+            details={"target_version": version},
+        )
+        db.commit()
+
+        try:
+            queued = migrate_kb_embedding_namespace.delay(kb_id, version)
+            task_id = getattr(queued, "id", None)
+        except Exception as queue_err:
+            fail_embedding_migration(
+                db,
+                kb_id=kb_id,
+                error_message=str(queue_err),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Failed to queue embedding migration job.",
+            ) from queue_err
+
+        return {
+            "kb_id": kb_id,
+            "active_version": namespace.active_version,
+            "target_version": namespace.target_version,
+            "migration_status": namespace.migration_status,
+            "migration_progress": namespace.migration_progress,
+            "task_id": task_id,
+        }
     finally:
         db.close()
 
@@ -981,7 +1941,7 @@ def delete_knowledge_base(user: User, kb_id: int) -> dict[str, Any]:
         db.close()
 
     try:
-        delete_collection(kb_id=kb_id)
+        delete_all_collections_for_kb(kb_id=kb_id)
     except Exception as exc:
         logger.warning("KB collection cleanup skipped for kb_id=%s: %s", kb_id, exc)
     return {"message": "Knowledge base deleted.", "kb_id": kb_id}
@@ -1060,6 +2020,144 @@ def list_documents(user: User, kb_id: int | None = None) -> list[dict[str, Any]]
         db.close()
 
 
+def list_ingestion_dead_letters(
+    user: User,
+    kb_id: int,
+    limit: int = 100,
+    resolved: bool = False,
+) -> list[dict[str, Any]]:
+    db = SessionLocal()
+    try:
+        require_kb_access(db, user.id, kb_id, min_role=KnowledgeBaseRole.EDITOR)
+        return list_dead_letters(
+            db,
+            knowledge_base_id=kb_id,
+            limit=limit,
+            resolved=resolved,
+        )
+    finally:
+        db.close()
+
+
+def retry_ingestion_dead_letter(user: User, dead_letter_id: int) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        row = db.query(IngestionDeadLetter).filter(IngestionDeadLetter.id == dead_letter_id).first()
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dead-letter entry not found")
+
+        require_kb_access(db, user.id, row.knowledge_base_id, min_role=KnowledgeBaseRole.EDITOR)
+        doc = db.query(Document).filter(Document.id == row.document_id).first()
+        if doc is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+        if doc.status == DocumentStatus.PROCESSING:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Document is currently processing. Retry is blocked until processing finishes.",
+            )
+
+        doc.status = DocumentStatus.PENDING
+        doc.error_message = None
+        row.retry_count = int(row.retry_count or 0) + 1
+        row.updated_at = datetime.utcnow()
+        log_audit_event(
+            db,
+            user_id=user.id,
+            knowledge_base_id=row.knowledge_base_id,
+            action="document.dlq.retry",
+            resource_type="ingestion_dead_letter",
+            resource_id=str(row.id),
+            details={"document_id": row.document_id},
+        )
+        db.commit()
+
+        job_id = _queue_document_ingestion_job(
+            db,
+            user_id=user.id,
+            kb_id=row.knowledge_base_id,
+            document_id=row.document_id,
+            reason=IngestionJobReason.RETRY,
+        )
+        return {
+            "dead_letter_id": row.id,
+            "document_id": row.document_id,
+            "kb_id": row.knowledge_base_id,
+            "ingestion_job_id": job_id,
+            "message": "Dead-letter retry queued.",
+        }
+    finally:
+        db.close()
+
+
+def get_connector_sync_cursor(user: User, kb_id: int, source_type: str, scope_key: str) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        require_kb_access(db, user.id, kb_id, min_role=KnowledgeBaseRole.EDITOR)
+        row = get_connector_sync_state(
+            db,
+            knowledge_base_id=kb_id,
+            source_type=(source_type or "").strip(),
+            scope_key=(scope_key or "").strip(),
+        )
+        if row is None:
+            return {
+                "kb_id": kb_id,
+                "source_type": source_type,
+                "scope_key": scope_key,
+                "cursor": None,
+                "last_synced_at": None,
+                "last_success_at": None,
+                "last_error": None,
+            }
+        return {
+            "kb_id": row.knowledge_base_id,
+            "source_type": row.source_type,
+            "scope_key": row.scope_key,
+            "cursor": row.cursor,
+            "last_synced_at": row.last_synced_at.isoformat() if row.last_synced_at else None,
+            "last_success_at": row.last_success_at.isoformat() if row.last_success_at else None,
+            "last_error": row.last_error,
+        }
+    finally:
+        db.close()
+
+
+def upsert_connector_sync_cursor(
+    user: User,
+    kb_id: int,
+    source_type: str,
+    scope_key: str,
+    cursor: str | None,
+    last_synced_at: datetime | None,
+    successful: bool = True,
+    error: str | None = None,
+) -> dict[str, Any]:
+    db = SessionLocal()
+    try:
+        require_kb_access(db, user.id, kb_id, min_role=KnowledgeBaseRole.EDITOR)
+        row = mark_connector_sync(
+            db,
+            knowledge_base_id=kb_id,
+            source_type=(source_type or "").strip(),
+            scope_key=(scope_key or "").strip(),
+            cursor=cursor,
+            synced_at=last_synced_at,
+            error=error,
+            successful=successful,
+        )
+        return {
+            "kb_id": row.knowledge_base_id,
+            "source_type": row.source_type,
+            "scope_key": row.scope_key,
+            "cursor": row.cursor,
+            "last_synced_at": row.last_synced_at.isoformat() if row.last_synced_at else None,
+            "last_success_at": row.last_success_at.isoformat() if row.last_success_at else None,
+            "last_error": row.last_error,
+        }
+    finally:
+        db.close()
+
+
 def rename_document(user: User, document_id: int, filename: str) -> dict[str, Any]:
     new_filename = _normalize_document_filename(filename)
     new_filename_key = _document_filename_key(new_filename)
@@ -1124,31 +2222,20 @@ def rename_document(user: User, document_id: int, filename: str) -> dict[str, An
                 cleanup_err,
             )
 
-        try:
-            ingest_document.delay(doc.id)
-        except Exception as queue_err:
-            doc.status = DocumentStatus.FAILED
-            doc.error_message = str(queue_err)
-            log_audit_event(
-                db,
-                user_id=user.id,
-                knowledge_base_id=doc.knowledge_base_id,
-                action="document.reindex.queue_failed",
-                resource_type="document",
-                resource_id=str(doc.id),
-                details={"detail": str(queue_err)},
-            )
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Failed to queue re-indexing job after rename.",
-            ) from queue_err
+        job_id = _queue_document_ingestion_job(
+            db,
+            user_id=user.id,
+            kb_id=doc.knowledge_base_id,
+            document_id=doc.id,
+            reason=IngestionJobReason.REINDEX,
+        )
 
         return {
             "document_id": doc.id,
             "kb_id": doc.knowledge_base_id,
             "filename": doc.filename,
             "status": doc.status,
+            "ingestion_job_id": job_id,
             "message": "Document renamed and re-indexing queued.",
         }
     finally:
@@ -1180,30 +2267,19 @@ def retry_document_ingestion(user: User, document_id: int) -> dict[str, Any]:
             details={"filename": doc.filename, "previous_status": previous_status},
         )
         db.commit()
-        try:
-            ingest_document.delay(doc.id)
-        except Exception as queue_err:
-            doc.status = DocumentStatus.FAILED
-            doc.error_message = str(queue_err)
-            log_audit_event(
-                db,
-                user_id=user.id,
-                knowledge_base_id=doc.knowledge_base_id,
-                action="document.retry.queue_failed",
-                resource_type="document",
-                resource_id=str(doc.id),
-                details={"detail": str(queue_err)},
-            )
-            db.commit()
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Failed to queue ingestion retry job.",
-            ) from queue_err
+        job_id = _queue_document_ingestion_job(
+            db,
+            user_id=user.id,
+            kb_id=doc.knowledge_base_id,
+            document_id=doc.id,
+            reason=IngestionJobReason.RETRY,
+        )
         return {
             "document_id": doc.id,
             "kb_id": doc.knowledge_base_id,
             "filename": doc.filename,
             "status": doc.status,
+            "ingestion_job_id": job_id,
             "message": "Document retry queued.",
         }
     finally:
@@ -1305,12 +2381,25 @@ def get_chat_session(user: User, session_id: str, limit: int = 100) -> dict:
             .limit(limit)
             .all()
         )
+        assistant_ids = [m.id for m in rows if m.role == ChatRole.ASSISTANT]
+        feedback_by_message: dict[int, str] = {}
+        if assistant_ids:
+            feedback_rows = (
+                db.query(ChatFeedback.chat_message_id, ChatFeedback.rating)
+                .filter(
+                    ChatFeedback.user_id == user.id,
+                    ChatFeedback.chat_message_id.in_(assistant_ids),
+                )
+                .all()
+            )
+            feedback_by_message = {int(mid): rating for mid, rating in feedback_rows}
         messages = [
             {
                 "id": m.id,
                 "role": m.role,
                 "content": m.content,
                 "created_at": m.created_at.isoformat(),
+                "feedback_rating": feedback_by_message.get(m.id),
             }
             for m in reversed(rows)
         ]
@@ -1357,7 +2446,7 @@ def _assert_valid_kb_role(role: str) -> str:
     if normalized not in VALID_KB_ROLES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid role '{role}'. Allowed roles: owner, editor, viewer.",
+            detail=f"Invalid role '{role}'. Allowed roles: owner, editor, viewer, api_user.",
         )
     return normalized
 

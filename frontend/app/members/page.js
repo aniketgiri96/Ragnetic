@@ -17,7 +17,7 @@ const inputClass = "fut-input";
 const labelClass = "fut-label";
 const btnPrimary = "fut-btn";
 const btnSecondary = "fut-btn-ghost";
-const ROLE_OPTIONS = ["owner", "editor", "viewer"];
+const ROLE_OPTIONS = ["owner", "editor", "viewer", "api_user"];
 
 function compactDetail(details) {
   if (!details || typeof details !== "object") return "-";

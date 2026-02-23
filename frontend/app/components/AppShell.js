@@ -6,13 +6,14 @@ import { usePathname, useRouter } from "next/navigation";
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const TOKEN_KEY = "ragnetic_token";
 
-const DASHBOARD_ROUTES = new Set(["/dashboard", "/upload", "/search", "/chat", "/members"]);
+const DASHBOARD_ROUTES = new Set(["/dashboard", "/onboarding", "/upload", "/search", "/chat", "/members"]);
 
 const SIDEBAR_SECTIONS = [
   {
     title: "Core",
     links: [
       { href: "/dashboard", label: "Overview" },
+      { href: "/onboarding", label: "Onboarding" },
       { href: "/upload", label: "Upload" },
       { href: "/search", label: "Search" },
       { href: "/chat", label: "Chat" },

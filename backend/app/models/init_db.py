@@ -1,8 +1,12 @@
 """Create tables and default knowledge base."""
 from app.models.base import Base, engine, SessionLocal
+from app.models.analytics import ChatFeedback  # noqa: F401 - register model for create_all
 from app.models.audit import AuditLog  # noqa: F401 - register model for create_all
 from app.models.chat import ChatJob, ChatMessage, ChatSession
 from app.models.document import Document, KnowledgeBase, KnowledgeBaseMembership
+from app.models.embedding import KBEmbeddingNamespace, KBEmbeddingVersion
+from app.models.ingestion import ConnectorSyncState, IngestionDeadLetter, IngestionJob
+from app.models.tenant import Organization, OrganizationMembership, Team, TeamKnowledgeBaseAccess, TeamMembership
 from app.models.user import User  # noqa: F401 - register model for create_all
 
 
