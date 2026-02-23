@@ -41,6 +41,15 @@ def collection_exists(kb_id: int, embedding_version: str = DEFAULT_EMBEDDING_VER
     return any(c.name == name for c in collections)
 
 
+def delete_collection(kb_id: int, embedding_version: str = DEFAULT_EMBEDDING_VERSION) -> bool:
+    """Delete an embedding collection for a KB if present."""
+    if not collection_exists(kb_id, embedding_version):
+        return False
+    coll = collection_name(kb_id, embedding_version)
+    get_qdrant().delete_collection(collection_name=coll)
+    return True
+
+
 def upsert_chunks(collection: str, points: list[PointStruct]):
     get_qdrant().upsert(collection_name=collection, points=points)
 

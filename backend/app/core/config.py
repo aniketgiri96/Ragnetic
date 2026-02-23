@@ -37,6 +37,9 @@ class Settings(BaseSettings):
 
     chat_context_max_sources: int = 4
     chat_context_max_chars_per_source: int = 420
+    chat_unique_sources_per_document: bool = True
+    chat_low_confidence_threshold: float = 0.45
+    chat_enforce_citation_format: bool = True
 
     retrieval_top_k: int = 5
     retrieval_dense_limit: int = 20

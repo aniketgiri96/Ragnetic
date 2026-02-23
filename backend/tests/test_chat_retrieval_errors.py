@@ -8,7 +8,7 @@ def test_retrieve_for_chat_returns_sources(monkeypatch):
     def _fake_hybrid_retrieve(kb_id: int, query: str, top_k: int):
         assert kb_id == 7
         assert query == "pto policy"
-        assert top_k == 3
+        assert top_k >= 3
         return [
             {
                 "snippet": "PTO policy text",

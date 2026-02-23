@@ -20,8 +20,10 @@ def _update_doc_status(doc_id: int, status: str, error_message: str | None = Non
         doc = db.query(Document).filter(Document.id == doc_id).first()
         if doc:
             doc.status = status
-            if error_message:
+            if error_message is not None:
                 doc.error_message = error_message
+            elif status != DocumentStatus.FAILED:
+                doc.error_message = None
             db.commit()
     finally:
         db.close()
@@ -32,7 +34,6 @@ def ingest_document(self, document_id: int) -> dict:
     """Parse, chunk, embed, and index a document."""
     _update_doc_status(document_id, DocumentStatus.PROCESSING)
     db = SessionLocal()
-    doc = None
     try:
         doc = db.query(Document).filter(Document.id == document_id).first()
         if not doc:
@@ -47,42 +48,49 @@ def ingest_document(self, document_id: int) -> dict:
     finally:
         db.close()
 
-    self.update_state(state="PROCESSING", meta={"progress": 10})
-    text, parse_meta = parse_document(content, filename)
-    self.update_state(state="PROCESSING", meta={"progress": 30})
+    try:
+        self.update_state(state="PROCESSING", meta={"progress": 10})
+        text, parse_meta = parse_document(content, filename)
+        self.update_state(state="PROCESSING", meta={"progress": 30})
 
-    chunks = chunk_text(
-        text,
-        max_chunk_chars=settings.chunk_max_chars,
-        overlap_chars=settings.chunk_overlap_chars,
-        min_chunk_chars=settings.chunk_min_chars,
-        metadata_base={"source": doc.filename, "doc_id": document_id, **parse_meta},
-    )
-    if not chunks:
-        _update_doc_status(document_id, DocumentStatus.INDEXED)
-        return {"document_id": document_id, "status": "indexed", "chunks": 0}
-
-    self.update_state(state="PROCESSING", meta={"progress": 50})
-    texts = [c.text for c in chunks]
-    vectors = embed_texts(texts)
-    self.update_state(state="PROCESSING", meta={"progress": 70})
-
-    db2 = SessionLocal()
-    doc_ref = db2.query(Document).filter(Document.id == document_id).first()
-    kb_id = doc_ref.knowledge_base_id if doc_ref else 1
-    db2.close()
-    coll = ensure_collection(kb_id)
-    # Ensure re-indexing a document does not leave stale chunks behind.
-    delete_document_chunks(kb_id=kb_id, doc_id=document_id)
-    points = [
-        PointStruct(
-            id=str(uuid.uuid4()),
-            vector=vec,
-            payload={"text": c.text, "metadata": c.metadata, "doc_id": document_id},
+        chunks = chunk_text(
+            text,
+            max_chunk_chars=settings.chunk_max_chars,
+            overlap_chars=settings.chunk_overlap_chars,
+            min_chunk_chars=settings.chunk_min_chars,
+            metadata_base={"source": filename, "doc_id": document_id, **parse_meta},
         )
-        for c, vec in zip(chunks, vectors)
-    ]
-    upsert_chunks(coll, points)
-    self.update_state(state="PROCESSING", meta={"progress": 100})
-    _update_doc_status(document_id, DocumentStatus.INDEXED)
-    return {"document_id": document_id, "status": "indexed", "chunks": len(chunks)}
+        if not chunks:
+            _update_doc_status(document_id, DocumentStatus.INDEXED)
+            return {"document_id": document_id, "status": "indexed", "chunks": 0}
+
+        self.update_state(state="PROCESSING", meta={"progress": 50})
+        texts = [c.text for c in chunks]
+        vectors = embed_texts(texts)
+        self.update_state(state="PROCESSING", meta={"progress": 70})
+
+        db2 = SessionLocal()
+        try:
+            doc_ref = db2.query(Document).filter(Document.id == document_id).first()
+            kb_id = doc_ref.knowledge_base_id if doc_ref else 1
+        finally:
+            db2.close()
+
+        coll = ensure_collection(kb_id)
+        # Ensure re-indexing a document does not leave stale chunks behind.
+        delete_document_chunks(kb_id=kb_id, doc_id=document_id)
+        points = [
+            PointStruct(
+                id=str(uuid.uuid4()),
+                vector=vec,
+                payload={"text": c.text, "metadata": c.metadata, "doc_id": document_id},
+            )
+            for c, vec in zip(chunks, vectors)
+        ]
+        upsert_chunks(coll, points)
+        self.update_state(state="PROCESSING", meta={"progress": 100})
+        _update_doc_status(document_id, DocumentStatus.INDEXED)
+        return {"document_id": document_id, "status": "indexed", "chunks": len(chunks)}
+    except Exception as e:
+        _update_doc_status(document_id, DocumentStatus.FAILED, str(e))
+        return {"document_id": document_id, "status": "failed", "error": str(e)}

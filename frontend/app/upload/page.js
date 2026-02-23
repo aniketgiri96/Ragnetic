@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { deleteDocument, documentStatus, listDocuments, listKb, renameDocument, uploadFile } from "../../lib/api.js";
+import { deleteDocument, documentStatus, listDocuments, listKb, renameDocument, retryDocumentIngestion, uploadFile } from "../../lib/api.js";
 
 const inputClass =
   "fut-input";
@@ -12,7 +12,6 @@ export default function UploadPage() {
   const [kbs, setKbs] = useState([]);
   const [kbId, setKbId] = useState("");
   const [file, setFile] = useState(null);
-  const [replaceExisting, setReplaceExisting] = useState(true);
   const [status, setStatus] = useState("");
   const [docId, setDocId] = useState(null);
   const [polling, setPolling] = useState(false);
@@ -20,6 +19,7 @@ export default function UploadPage() {
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [docActionId, setDocActionId] = useState(null);
   const [menuDocId, setMenuDocId] = useState(null);
+  const [menuDirection, setMenuDirection] = useState("down");
 
   useEffect(() => {
     listKb()
@@ -97,17 +97,12 @@ export default function UploadPage() {
       const res = await uploadFile(
         file,
         kbId ? parseInt(kbId, 10) : undefined,
-        { replaceExisting },
       );
       if (res.deduplicated) {
         setStatus(`Already uploaded (deduplicated). Document ID: ${res.document_id}`);
         setPolling(false);
-      } else if (res.replaced) {
-        setStatus(`Replaced existing file. Re-indexing queued. Document ID: ${res.document_id}`);
-        setDocId(res.document_id);
-        setPolling(true);
       } else if (res.replace_required) {
-        setStatus("File already exists. Enable replace and upload again.");
+        setStatus("Filename already exists in this knowledge base. Rename or delete the existing document first.");
         setPolling(false);
       } else {
         setStatus(`Queued. Document ID: ${res.document_id}`);
@@ -130,6 +125,10 @@ export default function UploadPage() {
     const normalized = nextName.trim();
     if (!normalized) {
       setStatus("Filename cannot be empty.");
+      return;
+    }
+    if (normalized === (doc.filename || "").trim()) {
+      setStatus("Filename unchanged. No re-indexing queued.");
       return;
     }
     setDocActionId(doc.document_id);
@@ -161,6 +160,22 @@ export default function UploadPage() {
       await refreshDocuments();
     } catch (err) {
       setStatus(`Error: ${err?.message || "Delete failed"}`);
+    } finally {
+      setDocActionId(null);
+    }
+  };
+
+  const handleRetry = async (doc) => {
+    setMenuDocId(null);
+    setDocActionId(doc.document_id);
+    try {
+      const out = await retryDocumentIngestion(doc.document_id);
+      setStatus(out?.message || "Retry queued.");
+      setDocId(doc.document_id);
+      setPolling(true);
+      await refreshDocuments();
+    } catch (err) {
+      setStatus(`Error: ${err?.message || "Retry failed"}`);
     } finally {
       setDocActionId(null);
     }
@@ -221,14 +236,7 @@ export default function UploadPage() {
               />
             </div>
           </div>
-          <label className="upload-replace-toggle">
-            <input
-              type="checkbox"
-              checked={replaceExisting}
-              onChange={(e) => setReplaceExisting(e.target.checked)}
-            />
-            <span>Replace existing file with same name (recommended)</span>
-          </label>
+          <p className="fut-alert-info">Filename must be unique per knowledge base (case-insensitive).</p>
           <button type="submit" disabled={!file} className={btnPrimary}>
             Upload
           </button>
@@ -304,9 +312,24 @@ export default function UploadPage() {
                             className="upload-docs-menu-btn"
                             aria-haspopup="menu"
                             aria-expanded={menuDocId === doc.document_id}
-                            onClick={() =>
-                              setMenuDocId((prev) => (prev === doc.document_id ? null : doc.document_id))
-                            }
+                            onClick={(event) => {
+                              if (menuDocId === doc.document_id) {
+                                setMenuDocId(null);
+                                return;
+                              }
+                              const rect = event.currentTarget?.getBoundingClientRect?.();
+                              if (rect) {
+                                const estimatedMenuHeight = doc.status === "failed" ? 156 : 112;
+                                const spaceAbove = rect.top;
+                                const spaceBelow = window.innerHeight - rect.bottom;
+                                setMenuDirection(
+                                  spaceBelow < estimatedMenuHeight && spaceAbove > spaceBelow ? "up" : "down",
+                                );
+                              } else {
+                                setMenuDirection("down");
+                              }
+                              setMenuDocId(doc.document_id);
+                            }}
                             disabled={busy}
                             title="Document actions"
                           >
@@ -318,16 +341,11 @@ export default function UploadPage() {
                             </span>
                           </button>
                           {menuDocId === doc.document_id && (
-                            <div className="upload-docs-menu" role="menu" aria-label="Document actions">
-                              <button
-                                type="button"
-                                className="upload-docs-menu-item"
-                                onClick={() => handleRename(doc)}
-                                disabled={busy}
-                                role="menuitem"
-                              >
-                                Rename
-                              </button>
+                            <div
+                              className={`upload-docs-menu ${menuDirection === "up" ? "is-up" : "is-down"}`}
+                              role="menu"
+                              aria-label="Document actions"
+                            >
                               <button
                                 type="button"
                                 className="upload-docs-menu-item is-danger"
@@ -337,6 +355,26 @@ export default function UploadPage() {
                               >
                                 Delete
                               </button>
+                              <button
+                                type="button"
+                                className="upload-docs-menu-item"
+                                onClick={() => handleRename(doc)}
+                                disabled={busy}
+                                role="menuitem"
+                              >
+                                Rename
+                              </button>
+                              {doc.status === "failed" && (
+                                <button
+                                  type="button"
+                                  className="upload-docs-menu-item"
+                                  onClick={() => handleRetry(doc)}
+                                  disabled={busy}
+                                  role="menuitem"
+                                >
+                                  Retry ingestion
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
