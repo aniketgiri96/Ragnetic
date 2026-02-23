@@ -1,6 +1,6 @@
 """Qdrant client and collection helpers."""
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, PointStruct, VectorParams
 
 from app.core.config import settings
 from app.ingestion.embedding import get_embedding_dim
@@ -34,8 +34,40 @@ def ensure_collection(kb_id: int, embedding_version: str = DEFAULT_EMBEDDING_VER
     return name
 
 
+def collection_exists(kb_id: int, embedding_version: str = DEFAULT_EMBEDDING_VERSION) -> bool:
+    name = collection_name(kb_id, embedding_version)
+    client = get_qdrant()
+    collections = client.get_collections().collections
+    return any(c.name == name for c in collections)
+
+
+def delete_collection(kb_id: int, embedding_version: str = DEFAULT_EMBEDDING_VERSION) -> bool:
+    """Delete an embedding collection for a KB if present."""
+    if not collection_exists(kb_id, embedding_version):
+        return False
+    coll = collection_name(kb_id, embedding_version)
+    get_qdrant().delete_collection(collection_name=coll)
+    return True
+
+
 def upsert_chunks(collection: str, points: list[PointStruct]):
     get_qdrant().upsert(collection_name=collection, points=points)
+
+
+def delete_document_chunks(kb_id: int, doc_id: int, embedding_version: str = DEFAULT_EMBEDDING_VERSION) -> None:
+    """Delete all points for a document from a KB collection."""
+    if not collection_exists(kb_id, embedding_version):
+        return
+    coll = collection_name(kb_id, embedding_version)
+    query_filter = Filter(
+        must=[
+            FieldCondition(
+                key="doc_id",
+                match=MatchValue(value=doc_id),
+            )
+        ]
+    )
+    get_qdrant().delete(collection_name=coll, points_selector=query_filter, wait=True)
 
 
 def search_collection(collection: str, vector: list[float], limit: int = 5):

@@ -1,59 +1,92 @@
 # Contributing to Ragnetic
 
-First off, thank you for considering contributing to Ragnetic! It's people like you that make Ragnetic a great tool for the open-source community.
+Thanks for contributing.
 
-## Development Setup
+This repository is a monorepo:
 
-The project is structured as a monorepo consisting of a Next.js frontend and a FastAPI backend.
+- `backend/` FastAPI + Celery
+- `frontend/` Next.js app
+- `docs/` product, architecture, and usage docs
 
-### Prerequisites
+## Prerequisites
 
-- You need Docker and Docker Compose installed.
-- Node.js 20+ (for frontend development)
-- Python 3.11+ (for backend development)
+- Docker + Docker Compose plugin (`docker compose`)
+- Python 3.11+
+- Node.js 20+
 
-### Running Services for Development
+## Local Development
 
-Rather than running the full docker-compose which builds production images, you can run the infrastructure dependencies via Docker and run the Frontend and Backend locally:
+### 1. Start dependencies
 
-1. **Start infrastructure (Postgres, Qdrant, Redis):**
-   ```bash
-   # We will provide a specific command for just infrastructure soon.
-   # For now, running `docker-compose up` is the default way.
-   ```
+From the repository root:
 
-2. **Backend Development:**
-   ```bash
-   cd backend
-   python -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   uvicorn app.main:app --reload
-   ```
+```bash
+docker compose up -d db redis qdrant minio
+```
 
-3. **Frontend Development:**
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
+Optional local LLM service:
+
+```bash
+docker compose up -d ollama
+```
+
+### 2. Run backend locally
+
+```bash
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+If you need ingestion workers while developing upload/indexing:
+
+```bash
+cd backend
+source .venv/bin/activate
+celery -A app.core.celery_app worker --loglevel=info
+```
+
+### 3. Run frontend locally
+
+```bash
+cd frontend
+npm install
+NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
+```
+
+App URLs:
+
+- Frontend: `http://localhost:3000`
+- Backend OpenAPI docs: `http://localhost:8000/docs`
+
+## Validation Before PR
+
+Run the checks that exist in this repository:
+
+```bash
+cd backend
+source .venv/bin/activate
+pytest
+```
+
+```bash
+cd frontend
+npm run build
+```
+
+If your change affects docs, update the relevant files in `README.md` or `docs/`.
 
 ## Pull Request Process
 
-1. Fork the repository and create your branch from `main`.
-2. Ensure you have tested your changes locally.
-3. Update documentation if necessary (e.g., README, API docs).
-4. Create a Pull Request with a clear description of the problem solved or feature added.
+1. Create a branch from `main`.
+2. Keep changes focused and include context in the PR description.
+3. Update docs and examples when behavior changes.
+4. Ensure local validation passes before opening a PR.
 
-## Code Standards
+## Community Standards
 
-- **Python**: We use `black` for formatting and `flake8` for linting. Please ensure your code is formatted before submitting. Use type hints extensively.
-- **TypeScript**: We use Prettier and ESLint. Ensure no TypeScript errors or warnings exist.
-
-## Good First Issues
-
-Look for issues labeled `good first issue` to start contributing. We provide mentorship on these issues!
-
-## Code of Conduct
-
-Please note that we have a Code of Conduct, please follow it in all your interactions with the project.
+- Code of Conduct: [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+- Security reporting: [`SECURITY.md`](SECURITY.md)
+- Support channels: [`SUPPORT.md`](SUPPORT.md)

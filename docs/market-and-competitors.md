@@ -24,4 +24,4 @@ Ragnetic competes on four axes:
 1. **Simplicity + power:** 5-minute Docker deploy with enterprise features—no DevOps team required and no toy limitations.
 2. **Documentation-first:** Early investment in docs, video tutorials, architecture guides, and contribution guidelines to drive adoption.
 3. **Opinionated UX:** Polished Next.js dashboard that non-technical users can use and share across teams.
-4. **Multi-source ingestion:** PDFs, Confluence, Slack, GitHub, emails, Notion supported at launch, not as an afterthought.
+4. **Multi-source ingestion roadmap:** Start with strong file-ingestion UX and expand connectors (Confluence, Slack, GitHub, email, Notion) iteratively.

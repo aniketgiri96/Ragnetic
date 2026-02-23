@@ -14,10 +14,15 @@
 
 Ragnetic provides a single deployable stack (Docker Compose) that includes:
 
-- Document ingestion (upload and connectors) with semantic-aware chunking  
+- Document ingestion from file uploads (PDF, TXT, MD, DOCX) with semantic-aware chunking  
 - Hybrid retrieval (vector + BM25) and reranking  
 - Chat over your data with source attribution and citation enforcement  
-- Knowledge base–scoped access control and audit logging  
+- Knowledge base-scoped access control (owner/editor/viewer)  
 - Optional local LLM and embeddings (Ollama, sentence-transformers)
 
 All data stays within your deployment boundary unless you explicitly configure external APIs.
+
+## Roadmap (not fully shipped yet)
+
+- Additional source connectors (e.g., SaaS knowledge tools)
+- Expanded observability and audit features
