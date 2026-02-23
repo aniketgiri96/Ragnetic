@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import Image from "next/image";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 const TOKEN_KEY = "ragnetic_token";
@@ -105,7 +106,13 @@ export default function AppShell({ children }) {
       <header className="dash-topbar">
         <nav className="dash-topbar-nav" aria-label="Main navigation">
           <a href={brandHref} className="dash-brand">
-            <span className="dash-brand-logo">R</span>
+            <Image
+              src="/assets/ragnatic-logo.png"
+              alt="Ragnetic"
+              width={36}
+              height={36}
+              className="dash-brand-logo"
+            />
             <span className="dash-brand-stack">
               <span className="dash-brand-text">Ragnetic</span>
               <span className="dash-brand-subtext">Knowledge workspace</span>
